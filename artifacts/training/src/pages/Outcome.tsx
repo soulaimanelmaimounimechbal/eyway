@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { CheckCircle2, AlertCircle, XCircle, RefreshCcw, Users, ArrowRight } from "lucide-react";
 import type { TranscriptEntry } from "@/lib/voice-client";
 import {
-  evaluateTurn,
+  evaluateAllTurns,
   pairTurns,
   summarizeCall,
   TURN_SIGNAL_CLASSES,
@@ -63,7 +63,14 @@ export default function Outcome({
   const visual = TIER_VISUALS[tier];
 
   const pairs = useMemo(() => pairTurns(transcript), [transcript]);
-  const summary = useMemo(() => summarizeCall(transcript, agent), [transcript, agent]);
+  // Per-turn signals are reconciled against the canonical tier so the
+  // breakdown can never contradict the headline (e.g. all-green dots under
+  // an amber tier is impossible).
+  const reconciledEvals = useMemo(
+    () => evaluateAllTurns(transcript, agent, tier),
+    [transcript, agent, tier],
+  );
+  const summary = useMemo(() => summarizeCall(transcript, agent, tier), [transcript, agent, tier]);
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col p-6 sm:p-10">
@@ -101,7 +108,8 @@ export default function Outcome({
           ) : (
             <ol className="space-y-4" data-testid="turn-breakdown">
               {pairs.map((p, idx) => {
-                const ev = evaluateTurn(p.user, agent);
+                const ev = reconciledEvals[idx];
+                if (!ev) return null;
                 const cls = TURN_SIGNAL_CLASSES[ev.signal];
                 return (
                   <li
@@ -134,21 +142,26 @@ export default function Outcome({
 
         <section className="rounded-2xl border border-primary/30 bg-primary/5 p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-primary">Try next time</h2>
-          <ul className="mt-3 space-y-2.5" data-testid="suggestions-list">
+          <ul className="mt-3 space-y-3" data-testid="suggestions-list">
             {summary.suggestions.map((s, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm">
+              <li key={i} className="flex items-start gap-2 text-sm" data-testid={`suggestion-${i}`}>
                 <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
                   {i + 1}
                 </span>
-                <span className="leading-snug">{s}</span>
+                <div className="flex-1">
+                  <div className="leading-snug">{s.text}</div>
+                  {s.quotedLine && (
+                    <div
+                      className="mt-1.5 border-l-2 border-primary/40 px-3 py-1 text-xs italic text-foreground/70"
+                      data-testid={`suggestion-quote-${i}`}
+                    >
+                      e.g. when you said "{s.quotedLine}"
+                    </div>
+                  )}
+                </div>
               </li>
             ))}
           </ul>
-          {summary.quotedLine && (
-            <div className="mt-4 border-l-2 border-primary/40 bg-primary/5 px-3 py-2 text-xs italic text-foreground/70" data-testid="quoted-line">
-              Anchored to your line: "{summary.quotedLine}"
-            </div>
-          )}
         </section>
 
         <section className="rounded-2xl border bg-card p-5 shadow-sm">

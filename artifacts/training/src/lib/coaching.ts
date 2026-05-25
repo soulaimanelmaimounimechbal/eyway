@@ -2,6 +2,7 @@ import type { AgentConfig, SocialStyle } from "./agents";
 import type { TranscriptEntry } from "./voice-client";
 
 export type TurnSignal = "green" | "amber" | "grey";
+export type Tier = "green" | "amber" | "red";
 
 export interface TurnEvaluation {
   signal: TurnSignal;
@@ -15,16 +16,29 @@ export interface CoachingNudge {
   text: string;
 }
 
-export interface CallSummary {
-  suggestions: string[];
+export interface AnchoredSuggestion {
+  text: string;
   quotedLine?: string;
+}
+
+export interface CallSummary {
+  suggestions: AnchoredSuggestion[];
   greenTurns: number;
   amberTurns: number;
   greyTurns: number;
 }
 
+// Per-turn thresholds are derived from the canonical scoreTranscript rules
+// (see voice-client.ts) so the two scorers cannot disagree:
+//   - scoreTranscript treats avgWords < 4 as a hard "red" floor
+//   - scoreTranscript only grants overall "green" when avgWords >= 10 AND
+//     there is at least one keyword hit per ~turn
+//   - everything in between with at least one keyword is "amber"
+// Mirroring those thresholds per turn means an aggregate of per-turn signals
+// is structurally compatible with the canonical tier; reconcileWithTier()
+// below provides a defense-in-depth check.
 const GREY_WORDS = 4;
-const SHORT_WORDS = 6;
+const GREEN_WORDS = 10;
 
 function wordsOf(text: string): string[] {
   return text.trim().split(/\s+/).filter(Boolean);
@@ -65,10 +79,68 @@ export function evaluateTurn(turn: TranscriptEntry, persona: AgentConfig): TurnE
   if (wordCount < GREY_WORDS) {
     return { signal: "grey", note: GREY_NOTE, hits, wordCount };
   }
-  if (hits.length >= 1 && wordCount >= SHORT_WORDS) {
+  // Mirrors the canonical avgWords >= 10 + keyword-hit threshold per turn.
+  if (hits.length >= 1 && wordCount >= GREEN_WORDS) {
     return { signal: "green", note: notes.green, hits, wordCount };
   }
   return { signal: "amber", note: notes.amber, hits, wordCount };
+}
+
+/**
+ * Reconcile per-turn signals against the canonical tier from scoreTranscript.
+ * Guarantees the per-turn breakdown never contradicts the headline tier:
+ *   - tier=red    → no greens (downgrade any greens to amber)
+ *   - tier=amber  → cannot be "all green" (demote weakest green to amber)
+ *   - tier=green  → must have at least one green (promote strongest amber if needed)
+ */
+export function reconcileWithTier(
+  evals: TurnEvaluation[],
+  tier: Tier,
+): TurnEvaluation[] {
+  const out = evals.map((e) => ({ ...e }));
+  if (tier === "red") {
+    for (const e of out) {
+      if (e.signal === "green") {
+        e.signal = "amber";
+        e.note = TURN_NOTES.analytical.amber; // overwritten below
+      }
+    }
+    return out;
+  }
+  if (tier === "amber") {
+    const nonGrey = out.filter((e) => e.signal !== "grey");
+    if (nonGrey.length > 0 && nonGrey.every((e) => e.signal === "green")) {
+      // Demote the weakest green (fewest hits, then shortest) to amber.
+      let weakest = nonGrey[0];
+      for (const e of nonGrey) {
+        if (
+          e.hits.length < weakest.hits.length ||
+          (e.hits.length === weakest.hits.length && e.wordCount < weakest.wordCount)
+        ) {
+          weakest = e;
+        }
+      }
+      weakest.signal = "amber";
+    }
+    return out;
+  }
+  // tier === "green"
+  if (!out.some((e) => e.signal === "green")) {
+    // Promote the strongest amber (most hits, then longest) to green.
+    let strongest: TurnEvaluation | null = null;
+    for (const e of out) {
+      if (e.signal !== "amber") continue;
+      if (
+        !strongest ||
+        e.hits.length > strongest.hits.length ||
+        (e.hits.length === strongest.hits.length && e.wordCount > strongest.wordCount)
+      ) {
+        strongest = e;
+      }
+    }
+    if (strongest) strongest.signal = "green";
+  }
+  return out;
 }
 
 const NUDGE_TEXTS: Record<SocialStyle, { id: string; text: string }> = {
@@ -132,33 +204,48 @@ const SUGGESTIONS: Record<SocialStyle, string[]> = {
   ],
 };
 
-export function summarizeCall(transcript: TranscriptEntry[], persona: AgentConfig): CallSummary {
+export function summarizeCall(
+  transcript: TranscriptEntry[],
+  persona: AgentConfig,
+  tier: Tier,
+): CallSummary {
   const userTurns = transcript.filter((t) => t.role === "user" && t.done && t.text.trim());
-  const evals = userTurns.map((t) => evaluateTurn(t, persona));
+  const rawEvals = userTurns.map((t) => evaluateTurn(t, persona));
+  const evals = reconcileWithTier(rawEvals, tier);
+
   let green = 0, amber = 0, grey = 0;
-  let worstTurn: { text: string; len: number } | null = null;
-  for (let i = 0; i < evals.length; i++) {
-    const e = evals[i];
+  for (const e of evals) {
     if (e.signal === "green") green++;
     else if (e.signal === "amber") amber++;
     else grey++;
-    if (e.signal !== "green") {
-      const len = userTurns[i].text.length;
-      if (!worstTurn || len > worstTurn.len) {
-        worstTurn = { text: userTurns[i].text, len };
-      }
-    }
   }
-  const allSuggestions = SUGGESTIONS[persona.id];
-  // Show all three by default; trim to 3 explicitly per the task.
-  const suggestions = allSuggestions.slice(0, 3);
-  return {
-    suggestions,
-    quotedLine: worstTurn?.text,
-    greenTurns: green,
-    amberTurns: amber,
-    greyTurns: grey,
-  };
+
+  // Anchor each suggestion to its own quoted user line. We rank candidate
+  // turns by "how clearly off-style" they were (amber > grey, then longer
+  // lines first so the quote is meaningful). If we run out of off-style
+  // turns we fall back to any user turn, and finally to no anchor.
+  const ranked = userTurns
+    .map((t, i) => ({ turn: t, ev: evals[i] }))
+    .filter((x) => x.ev.signal !== "green")
+    .sort((a, b) => {
+      const sigRank = (s: TurnSignal) => (s === "amber" ? 0 : s === "grey" ? 1 : 2);
+      const r = sigRank(a.ev.signal) - sigRank(b.ev.signal);
+      if (r !== 0) return r;
+      return b.turn.text.length - a.turn.text.length;
+    });
+  const fallback = userTurns.filter((t) => !ranked.some((r) => r.turn === t));
+  const quotes: (string | undefined)[] = [];
+  for (let i = 0; i < SUGGESTIONS[persona.id].length; i++) {
+    if (i < ranked.length) quotes.push(ranked[i].turn.text);
+    else if (i - ranked.length < fallback.length) quotes.push(fallback[i - ranked.length].text);
+    else quotes.push(undefined);
+  }
+
+  const suggestions: AnchoredSuggestion[] = SUGGESTIONS[persona.id]
+    .slice(0, 3)
+    .map((text, i) => ({ text, quotedLine: quotes[i] }));
+
+  return { suggestions, greenTurns: green, amberTurns: amber, greyTurns: grey };
 }
 
 export const TURN_SIGNAL_CLASSES: Record<TurnSignal, { dot: string; ring: string; label: string }> = {
@@ -167,7 +254,7 @@ export const TURN_SIGNAL_CLASSES: Record<TurnSignal, { dot: string; ring: string
   grey: { dot: "bg-muted-foreground/50", ring: "ring-muted-foreground/30", label: "too short" },
 };
 
-/** Pair each user turn with the assistant turn that immediately follows it. */
+/** Pair each completed user turn with the next assistant turn that follows it. */
 export function pairTurns(
   transcript: TranscriptEntry[],
 ): { user: TranscriptEntry; assistant?: TranscriptEntry }[] {
@@ -185,4 +272,18 @@ export function pairTurns(
     pairs.push({ user: t, assistant });
   }
   return pairs;
+}
+
+/**
+ * Compute the per-turn evaluations the Outcome screen should render —
+ * always reconciled against the canonical tier so the per-turn dots and
+ * the headline tier are guaranteed to agree.
+ */
+export function evaluateAllTurns(
+  transcript: TranscriptEntry[],
+  persona: AgentConfig,
+  tier: Tier,
+): TurnEvaluation[] {
+  const userTurns = transcript.filter((t) => t.role === "user" && t.done && t.text.trim());
+  return reconcileWithTier(userTurns.map((t) => evaluateTurn(t, persona)), tier);
 }
