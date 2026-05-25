@@ -76,11 +76,18 @@ export function evaluateTurn(turn: TranscriptEntry, persona: AgentConfig): TurnE
   const hits = matchKeywords(turn.text, persona.keywords);
   const notes = TURN_NOTES[persona.id];
 
+  // Too short to register as adapting to the style at all.
   if (wordCount < GREY_WORDS) {
     return { signal: "grey", note: GREY_NOTE, hits, wordCount };
   }
+  // Amber / green BOTH require at least one persona keyword hit. A turn
+  // with no hits cannot register as "partial fit" — that would let an
+  // all-amber breakdown sit under a canonical "red" tier (no hits anywhere).
+  if (hits.length === 0) {
+    return { signal: "grey", note: notes.amber, hits, wordCount };
+  }
   // Mirrors the canonical avgWords >= 10 + keyword-hit threshold per turn.
-  if (hits.length >= 1 && wordCount >= GREEN_WORDS) {
+  if (wordCount >= GREEN_WORDS) {
     return { signal: "green", note: notes.green, hits, wordCount };
   }
   return { signal: "amber", note: notes.amber, hits, wordCount };
@@ -96,13 +103,19 @@ export function evaluateTurn(turn: TranscriptEntry, persona: AgentConfig): TurnE
 export function reconcileWithTier(
   evals: TurnEvaluation[],
   tier: Tier,
+  persona: AgentConfig,
 ): TurnEvaluation[] {
+  const notes = TURN_NOTES[persona.id];
   const out = evals.map((e) => ({ ...e }));
   if (tier === "red") {
+    // Under a red tier, no turn may read as "on-style". With the tightened
+    // amber rule (requires ≥1 keyword hit), a true red transcript usually
+    // has zero hits anywhere, so most turns are already grey. We still
+    // demote any greens to amber and use the persona's amber note.
     for (const e of out) {
       if (e.signal === "green") {
         e.signal = "amber";
-        e.note = TURN_NOTES.analytical.amber; // overwritten below
+        e.note = notes.amber;
       }
     }
     return out;
@@ -121,12 +134,12 @@ export function reconcileWithTier(
         }
       }
       weakest.signal = "amber";
+      weakest.note = notes.amber;
     }
     return out;
   }
-  // tier === "green"
+  // tier === "green": ensure at least one green dot exists.
   if (!out.some((e) => e.signal === "green")) {
-    // Promote the strongest amber (most hits, then longest) to green.
     let strongest: TurnEvaluation | null = null;
     for (const e of out) {
       if (e.signal !== "amber") continue;
@@ -138,7 +151,10 @@ export function reconcileWithTier(
         strongest = e;
       }
     }
-    if (strongest) strongest.signal = "green";
+    if (strongest) {
+      strongest.signal = "green";
+      strongest.note = notes.green;
+    }
   }
   return out;
 }
@@ -211,7 +227,7 @@ export function summarizeCall(
 ): CallSummary {
   const userTurns = transcript.filter((t) => t.role === "user" && t.done && t.text.trim());
   const rawEvals = userTurns.map((t) => evaluateTurn(t, persona));
-  const evals = reconcileWithTier(rawEvals, tier);
+  const evals = reconcileWithTier(rawEvals, tier, persona);
 
   let green = 0, amber = 0, grey = 0;
   for (const e of evals) {
@@ -285,5 +301,5 @@ export function evaluateAllTurns(
   tier: Tier,
 ): TurnEvaluation[] {
   const userTurns = transcript.filter((t) => t.role === "user" && t.done && t.text.trim());
-  return reconcileWithTier(userTurns.map((t) => evaluateTurn(t, persona)), tier);
+  return reconcileWithTier(userTurns.map((t) => evaluateTurn(t, persona)), tier, persona);
 }
