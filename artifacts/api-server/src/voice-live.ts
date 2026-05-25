@@ -3,20 +3,31 @@ import type { Socket } from "node:net";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { WebSocketServer, WebSocket as WsWebSocket } from "ws";
 import type { Express, Request, Response } from "express";
+import { VoiceLiveClient, type VoiceLiveSession, type VoiceLiveSubscription } from "@azure/ai-voicelive";
+import { AzureKeyCredential } from "@azure/core-auth";
 import { logger } from "./lib/logger";
 
 const VOICE_LIVE_PATH = "/api/voice-live";
 const VOICE_TOKEN_PATH = "/api/voice-live/token";
-const DEFAULT_API_VERSION = "2025-05-01-preview";
-const DEFAULT_MODEL = "gpt-4o-realtime-preview";
-const MAX_QUEUE_BYTES = 2 * 1024 * 1024;
-const AZURE_CONNECT_TIMEOUT_MS = 10_000;
+const DEFAULT_MODEL = "gpt-realtime";
+const DEFAULT_VOICE = "en-US-Ava:DragonHDLatestNeural";
 const TOKEN_TTL_MS = 60_000;
+const START_TIMEOUT_MS = 8_000;
+const MAX_INSTR_LEN = 8_000;
+const MAX_GREETING_LEN = 1_000;
 
 function getSecret(): string {
   const k = process.env["AZURE_VOICE_LIVE_API_KEY"];
   if (!k) throw new Error("AZURE_VOICE_LIVE_API_KEY not configured");
   return k;
+}
+
+function getEndpoint(): string {
+  const e = process.env["AZURE_VOICE_LIVE_ENDPOINT"];
+  if (!e) throw new Error("AZURE_VOICE_LIVE_ENDPOINT is not configured");
+  let url = e.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(url) && !/^wss?:\/\//i.test(url)) url = `https://${url}`;
+  return url;
 }
 
 function signToken(nonce: string, exp: number, secret: string): string {
@@ -55,23 +66,12 @@ function verifyToken(token: string | null): boolean {
   return true;
 }
 
-function buildAzureWsUrl(): string {
-  const endpoint = process.env["AZURE_VOICE_LIVE_ENDPOINT"];
-  if (!endpoint) throw new Error("AZURE_VOICE_LIVE_ENDPOINT is not configured");
-  let host = endpoint.trim();
-  host = host.replace(/^https?:\/\//i, "").replace(/^wss?:\/\//i, "").replace(/\/+$/, "");
-  const apiVersion = process.env["AZURE_VOICE_LIVE_API_VERSION"] ?? DEFAULT_API_VERSION;
-  const model = process.env["AZURE_VOICE_LIVE_MODEL"] ?? DEFAULT_MODEL;
-  return `wss://${host}/voice-live/realtime?api-version=${encodeURIComponent(apiVersion)}&model=${encodeURIComponent(model)}`;
-}
-
-function isSameOrigin(req: IncomingMessage): boolean {
-  const origin = req.headers.origin;
-  const host = req.headers.host;
+function isSameOrigin(req: IncomingMessage | Request): boolean {
+  const origin = (req.headers as Record<string, string | undefined>).origin;
+  const host = (req.headers as Record<string, string | undefined>).host;
   if (!origin || !host) return false;
   try {
     const u = new URL(origin);
-    // Allow localhost in dev
     if (u.hostname === "localhost" || u.hostname === "127.0.0.1") return true;
     return u.host === host;
   } catch { return false; }
@@ -92,9 +92,42 @@ function safeClose(ws: WsWebSocket, code: number, reason: string) {
   }
 }
 
+function sendJson(ws: WsWebSocket, obj: unknown): void {
+  if (ws.readyState !== WsWebSocket.OPEN) return;
+  try { ws.send(JSON.stringify(obj)); }
+  catch (err) { logger.warn({ err: (err as Error).message }, "client send failed"); }
+}
+
+interface StartMsg {
+  type: "start";
+  instructions: string;
+  voice: string;
+  greeting: string;
+}
+
+function parseStartMessage(raw: unknown): StartMsg | null {
+  let text: string;
+  if (typeof raw === "string") text = raw;
+  else if (raw instanceof Buffer) text = raw.toString("utf-8");
+  else return null;
+  try {
+    const j = JSON.parse(text) as Record<string, unknown>;
+    if (j["type"] !== "start") return null;
+    const instructions = typeof j["instructions"] === "string" ? (j["instructions"] as string) : "";
+    const voice = typeof j["voice"] === "string" ? (j["voice"] as string) : DEFAULT_VOICE;
+    const greeting = typeof j["greeting"] === "string" ? (j["greeting"] as string) : "";
+    if (!instructions || !greeting) return null;
+    return {
+      type: "start",
+      instructions: instructions.slice(0, MAX_INSTR_LEN),
+      voice: voice.slice(0, 200),
+      greeting: greeting.slice(0, MAX_GREETING_LEN),
+    };
+  } catch { return null; }
+}
+
 export function registerVoiceLiveTokenRoute(app: Express): void {
   app.post(VOICE_TOKEN_PATH, (req: Request, res: Response) => {
-    // Origin check: same-origin or localhost
     if (!isSameOrigin(req)) {
       res.status(403).json({ error: "forbidden" });
       return;
@@ -139,85 +172,136 @@ export function attachVoiceLiveProxy(server: HttpServer): void {
       return;
     }
 
-    wss.handleUpgrade(req, socket, head, (client) => handleClient(client));
+    wss.handleUpgrade(req, socket, head, (client) => { void handleClient(client); });
   });
 
-  logger.info({ path: VOICE_LIVE_PATH }, "Voice Live WS proxy attached");
+  logger.info({ path: VOICE_LIVE_PATH }, "Voice Live WS proxy attached (SDK mode)");
 }
 
-function handleClient(client: WsWebSocket): void {
-  const apiKey = process.env["AZURE_VOICE_LIVE_API_KEY"];
-  if (!apiKey) { logger.error("AZURE_VOICE_LIVE_API_KEY missing"); safeClose(client, 1011, "server not configured"); return; }
+async function handleClient(client: WsWebSocket): Promise<void> {
+  let endpoint: string;
+  let apiKey: string;
+  try { endpoint = getEndpoint(); apiKey = getSecret(); }
+  catch (err) {
+    logger.error({ err: (err as Error).message }, "voice-live: server not configured");
+    safeClose(client, 1011, "server not configured");
+    return;
+  }
 
-  let azureUrl: string;
-  try { azureUrl = buildAzureWsUrl(); }
-  catch (err) { logger.error({ err }, "Failed to build Azure URL"); safeClose(client, 1011, "server not configured"); return; }
+  // Wait for the client to send the "start" message with persona config.
+  let start: StartMsg | null = null;
+  try {
+    start = await new Promise<StartMsg | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), START_TIMEOUT_MS);
+      const onMsg = (data: unknown) => {
+        const parsed = parseStartMessage(data);
+        if (parsed) {
+          clearTimeout(timer);
+          client.off("message", onMsg);
+          resolve(parsed);
+        }
+      };
+      client.on("message", onMsg);
+    });
+  } catch { /* noop */ }
 
-  logger.info("Opening Azure Voice Live WS");
-  const azure = new WsWebSocket(azureUrl, { headers: { "api-key": apiKey } });
+  if (!start) {
+    safeClose(client, 4400, "missing start configuration");
+    return;
+  }
 
-  const queued: Array<Buffer | string> = [];
-  let queuedBytes = 0;
-  let azureReady = false;
+  const model = process.env["AZURE_VOICE_LIVE_MODEL"] ?? DEFAULT_MODEL;
+  const sdkClient = new VoiceLiveClient(endpoint, new AzureKeyCredential(apiKey));
+  const session: VoiceLiveSession = sdkClient.createSession({ model });
 
-  const connectTimer = setTimeout(() => {
-    if (!azureReady) {
-      logger.error("Azure WS connect timeout");
-      try { azure.terminate(); } catch { /* noop */ }
-      safeClose(client, 1011, "upstream connect timeout");
-    }
-  }, AZURE_CONNECT_TIMEOUT_MS);
+  let subscription: VoiceLiveSubscription | null = null;
+  let closed = false;
+  const cleanup = async () => {
+    if (closed) return;
+    closed = true;
+    if (subscription) { try { await subscription.close(); } catch { /* noop */ } subscription = null; }
+    try { await session.disconnect(); } catch { /* noop */ }
+    try { await session.dispose(); } catch { /* noop */ }
+  };
 
-  azure.on("open", () => {
-    clearTimeout(connectTimer);
-    azureReady = true;
-    for (const msg of queued) {
-      try { azure.send(msg); } catch (err) { logger.warn({ err: (err as Error).message }, "flush send failed"); }
-    }
-    queued.length = 0; queuedBytes = 0;
-    logger.info("Azure WS open");
+  subscription = session.subscribe({
+    onSessionUpdated: async () => {
+      sendJson(client, { type: "ready" });
+    },
+    onResponseAudioDelta: async (event) => {
+      if (event.delta) sendJson(client, { type: "audio_delta", delta: event.delta });
+    },
+    onConversationItemInputAudioTranscriptionCompleted: async (event) => {
+      sendJson(client, { type: "user_transcript", text: event.transcript ?? "" });
+    },
+    onResponseAudioTranscriptDone: async (event) => {
+      sendJson(client, { type: "assistant_transcript", text: event.transcript ?? "" });
+    },
+    onInputAudioBufferSpeechStarted: async () => {
+      sendJson(client, { type: "speech_started" });
+      try { await session.sendEvent({ type: "response.cancel" }); } catch { /* may have no active response */ }
+    },
+    onResponseCreated: async () => { sendJson(client, { type: "assistant_speaking", value: true }); },
+    onResponseDone: async () => { sendJson(client, { type: "assistant_speaking", value: false }); },
+    onServerError: async (event) => {
+      const msg = event.error?.message ?? "voice service error";
+      logger.warn({ msg }, "voice-live: upstream error");
+      sendJson(client, { type: "error", message: msg });
+    },
   });
 
-  azure.on("message", (data) => {
-    if (client.readyState === WsWebSocket.OPEN) {
-      try { client.send(data as Buffer); } catch (err) { logger.warn({ err: (err as Error).message }, "client send failed"); }
-    }
-  });
+  try {
+    await session.connect();
+    await session.updateSession({
+      model,
+      modalities: ["text", "audio"],
+      instructions: start.instructions,
+      voice: { type: "azure-standard", name: start.voice },
+      inputAudioFormat: "pcm16",
+      outputAudioFormat: "pcm16",
+      turnDetection: {
+        type: "server_vad",
+        threshold: 0.5,
+        prefixPaddingInMs: 300,
+        silenceDurationInMs: 500,
+      },
+      inputAudioEchoCancellation: { type: "server_echo_cancellation" },
+      inputAudioNoiseReduction: { type: "azure_deep_noise_suppression" },
+      inputAudioTranscription: { model: "azure-speech" },
+    });
 
-  azure.on("close", (code, reason) => {
-    clearTimeout(connectTimer);
-    logger.info({ code, reason: reason.toString() }, "Azure WS closed");
-    if (client.readyState === WsWebSocket.OPEN) safeClose(client, code, reason.toString());
-  });
+    // Pre-generated greeting as assistant turn (deterministic; speaks the persona's opening line).
+    await session.sendEvent({
+      type: "response.create",
+      response: {
+        preGeneratedAssistantMessage: {
+          content: [{ type: "text", text: start.greeting }],
+        },
+      },
+    });
+  } catch (err) {
+    logger.error({ err: (err as Error).message }, "voice-live: session init failed");
+    sendJson(client, { type: "error", message: "session init failed" });
+    await cleanup();
+    safeClose(client, 1011, "session init failed");
+    return;
+  }
 
-  azure.on("error", (err) => {
-    logger.error({ err: err.message }, "Azure WS error");
-    if (client.readyState === WsWebSocket.OPEN) safeClose(client, 1011, "azure upstream error");
-  });
-
+  // From this point: any binary message from the client is mic PCM16 audio.
   client.on("message", (data) => {
-    const payload = data as Buffer;
-    if (azureReady && azure.readyState === WsWebSocket.OPEN) {
-      try { azure.send(payload); } catch (err) { logger.warn({ err: (err as Error).message }, "azure send failed"); }
-      return;
+    if (!session.isConnected) return;
+    if (data instanceof Buffer) {
+      const u8 = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      session.sendAudio(u8).catch((err: Error) => {
+        logger.debug({ err: err.message }, "sendAudio failed");
+      });
     }
-    const size = Buffer.isBuffer(payload) ? payload.byteLength : Buffer.byteLength(String(payload));
-    if (queuedBytes + size > MAX_QUEUE_BYTES) {
-      logger.warn({ queuedBytes, size }, "pre-open queue full; dropping client");
-      safeClose(client, 1013, "upstream not ready");
-      try { azure.terminate(); } catch { /* noop */ }
-      return;
-    }
-    queued.push(payload);
-    queuedBytes += size;
+    // Ignore stray JSON after start; we drive everything from server VAD.
   });
 
-  client.on("close", () => {
-    clearTimeout(connectTimer);
-    if (azure.readyState === WsWebSocket.OPEN || azure.readyState === WsWebSocket.CONNECTING) {
-      try { azure.close(); } catch { /* noop */ }
-    }
+  client.on("close", () => { void cleanup(); });
+  client.on("error", (err) => {
+    logger.warn({ err: err.message }, "voice-live: client ws error");
+    void cleanup();
   });
-
-  client.on("error", (err) => { logger.error({ err: err.message }, "Client WS error"); });
 }

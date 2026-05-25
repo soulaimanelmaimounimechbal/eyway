@@ -41,8 +41,6 @@ export class VoiceClient {
   private micStream: MediaStream | null = null;
   private state: VoiceState = "idle";
   private transcript: TranscriptEntry[] = [];
-  private currentAssistantText = "";
-  private currentUserText = "";
   private playQueueEndsAt = 0;
   private outstandingSources: AudioOut[] = [];
   private muted = false;
@@ -128,7 +126,6 @@ export class VoiceClient {
 
     const source = ctx.createMediaStreamSource(stream);
 
-    // Analyser for mic level meter
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
     this.analyser = analyser;
@@ -185,7 +182,7 @@ export class VoiceClient {
       ws.addEventListener("error", onErr);
     });
 
-    ws.addEventListener("message", (ev) => this.handleAzureMessage(ev.data));
+    ws.addEventListener("message", (ev) => this.handleServerMessage(ev.data));
     ws.addEventListener("close", () => {
       if (this.state !== "closing" && this.state !== "closed") {
         this.events.onError?.("connection closed");
@@ -194,26 +191,13 @@ export class VoiceClient {
     });
 
     ws.send(JSON.stringify({
-      type: "session.update",
-      session: {
-        modalities: ["audio", "text"],
-        instructions: this.agent.instructions,
-        voice: this.agent.voice,
-        input_audio_format: "pcm16",
-        output_audio_format: "pcm16",
-        input_audio_transcription: { model: "whisper-1" },
-        turn_detection: {
-          type: "server_vad", threshold: 0.5, prefix_padding_ms: 300,
-          silence_duration_ms: 600, create_response: true,
-        },
-      },
+      type: "start",
+      instructions: this.agent.instructions,
+      voice: this.agent.voice,
+      greeting: this.agent.greeting,
     }));
-    ws.send(JSON.stringify({
-      type: "conversation.item.create",
-      item: { type: "message", role: "assistant", content: [{ type: "text", text: this.agent.greeting }] },
-    }));
-    ws.send(JSON.stringify({ type: "response.create", response: { modalities: ["audio", "text"] } }));
 
+    // Optimistically show the greeting in the transcript; the server will speak it.
     this.transcript.push({ role: "assistant", text: this.agent.greeting, done: true });
     this.events.onTranscript?.([...this.transcript]);
 
@@ -223,89 +207,62 @@ export class VoiceClient {
   private sendAudioChunk(pcm: Int16Array) {
     if (this.muted) return;
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-    let bin = "";
-    const CHUNK = 0x8000;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)) as number[]);
-    }
-    this.ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: btoa(bin) }));
+    const buf = new ArrayBuffer(pcm.byteLength);
+    new Int16Array(buf).set(pcm);
+    this.ws.send(buf);
   }
 
-  private handleAzureMessage(raw: unknown) {
-    let msg: any;
+  private handleServerMessage(raw: unknown) {
+    let msg: { type?: string; [k: string]: unknown };
     try {
       const txt = typeof raw === "string" ? raw : new TextDecoder().decode(raw as ArrayBuffer);
       msg = JSON.parse(txt);
     } catch { return; }
+
     switch (msg.type) {
-      case "response.audio.delta":
-        if (typeof msg.delta === "string") this.playAudioChunk(msg.delta);
+      case "ready":
         break;
-      case "response.audio_transcript.delta":
-        if (typeof msg.delta === "string") {
-          this.currentAssistantText += msg.delta;
-          this.upsertCurrentAssistant();
-        }
+      case "audio_delta":
+        if (typeof msg["delta"] === "string") this.playAudioChunk(msg["delta"] as string);
         break;
-      case "response.audio_transcript.done":
-      case "response.output_item.done":
-        if (this.currentAssistantText.trim().length > 0) this.commitAssistant();
+      case "assistant_transcript":
+        if (typeof msg["text"] === "string") this.pushTranscript("assistant", msg["text"] as string);
         break;
-      case "conversation.item.input_audio_transcription.delta":
-        if (typeof msg.delta === "string") {
-          this.currentUserText += msg.delta;
-          this.upsertCurrentUser();
-        }
+      case "user_transcript":
+        if (typeof msg["text"] === "string") this.pushTranscript("user", msg["text"] as string);
         break;
-      case "conversation.item.input_audio_transcription.completed":
-        if (typeof msg.transcript === "string") {
-          this.currentUserText = msg.transcript;
-          this.commitUser();
-        }
-        break;
-      case "input_audio_buffer.speech_started":
+      case "speech_started":
+        this.cancelPendingPlayback();
         this.events.onSpeakingChange?.(false);
         break;
-      case "response.created":
-        this.events.onSpeakingChange?.(true);
-        break;
-      case "response.done":
-        if (this.currentAssistantText.trim().length > 0) this.commitAssistant();
-        this.events.onSpeakingChange?.(false);
+      case "assistant_speaking":
+        this.events.onSpeakingChange?.(Boolean(msg["value"]));
         break;
       case "error":
-        this.events.onError?.(String(msg.error?.message ?? "voice error"));
+        this.events.onError?.(String(msg["message"] ?? "voice error"));
         break;
       default: break;
     }
   }
 
-  private upsertCurrentAssistant() {
+  private pushTranscript(role: "user" | "assistant", text: string) {
+    const t = text.trim();
+    if (!t) return;
+    // Avoid duplicating the optimistic greeting line.
     const last = this.transcript[this.transcript.length - 1];
-    if (last && last.role === "assistant" && !last.done) last.text = this.currentAssistantText;
-    else this.transcript.push({ role: "assistant", text: this.currentAssistantText, done: false });
+    if (last && last.role === role && last.done && last.text.trim() === t) return;
+    this.transcript.push({ role, text: t, done: true });
     this.events.onTranscript?.([...this.transcript]);
   }
-  private commitAssistant() {
-    const last = this.transcript[this.transcript.length - 1];
-    if (last && last.role === "assistant" && !last.done) { last.text = this.currentAssistantText; last.done = true; }
-    else this.transcript.push({ role: "assistant", text: this.currentAssistantText, done: true });
-    this.currentAssistantText = "";
-    this.events.onTranscript?.([...this.transcript]);
-  }
-  private upsertCurrentUser() {
-    const last = this.transcript[this.transcript.length - 1];
-    if (last && last.role === "user" && !last.done) last.text = this.currentUserText;
-    else this.transcript.push({ role: "user", text: this.currentUserText, done: false });
-    this.events.onTranscript?.([...this.transcript]);
-  }
-  private commitUser() {
-    const last = this.transcript[this.transcript.length - 1];
-    if (last && last.role === "user" && !last.done) { last.text = this.currentUserText; last.done = true; }
-    else this.transcript.push({ role: "user", text: this.currentUserText, done: true });
-    this.currentUserText = "";
-    this.events.onTranscript?.([...this.transcript]);
+
+  private cancelPendingPlayback() {
+    if (!this.playCtx) return;
+    const now = this.playCtx.currentTime;
+    for (const o of this.outstandingSources) {
+      if (o.endsAt > now) { try { o.source.stop(); } catch { /* noop */ } }
+    }
+    this.outstandingSources = [];
+    this.playQueueEndsAt = now;
   }
 
   private playAudioChunk(b64: string) {
@@ -348,7 +305,6 @@ export function scoreTranscript(
   const avgWords = userTurns === 0 ? 0 : totalWords / userTurns;
   const hits = Array.from(new Set(agentKeywords.filter((k) => userText.includes(k.toLowerCase()))));
 
-  // Tier rules combine keyword adaptation + substantive (long enough) responses.
   let tier: "green" | "amber" | "red";
   if (userTurns < 2 || avgWords < 4) {
     tier = "red";
