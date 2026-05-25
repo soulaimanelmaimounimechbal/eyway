@@ -36,7 +36,7 @@ export class VoiceClient {
   private playCtx: AudioContext | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private analyser: AnalyserNode | null = null;
-  private analyserBuf: Float32Array | null = null;
+  private analyserBuf: Float32Array<ArrayBuffer> | null = null;
   private analyserRaf: number | null = null;
   private micStream: MediaStream | null = null;
   private state: VoiceState = "idle";
@@ -132,7 +132,7 @@ export class VoiceClient {
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
     this.analyser = analyser;
-    this.analyserBuf = new Float32Array(analyser.fftSize);
+    this.analyserBuf = new Float32Array(new ArrayBuffer(analyser.fftSize * 4));
     source.connect(analyser);
 
     const node = new AudioWorkletNode(ctx, "pcm-processor", {

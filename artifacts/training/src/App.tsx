@@ -110,7 +110,7 @@ function App() {
             onRestart={() => {
               setStyle(null);
               setResult(null);
-              setReflectData({ worked: "", struggled: "", next: "" });
+              setReflectData({ worked: "", next: "", hardestStyle: "" });
               setStep("select");
             }}
           />
