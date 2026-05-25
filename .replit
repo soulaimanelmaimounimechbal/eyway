@@ -38,3 +38,4 @@ channel = "stable-25_05"
 
 [userenv.shared]
 AZURE_VOICE_LIVE_API_VERSION = "2025-10-01"
+AZURE_VOICE_LIVE_MODEL = "gpt-4o"
