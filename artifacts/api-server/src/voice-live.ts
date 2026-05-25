@@ -9,7 +9,8 @@ import { logger } from "./lib/logger";
 
 const VOICE_LIVE_PATH = "/api/voice-live";
 const VOICE_TOKEN_PATH = "/api/voice-live/token";
-const DEFAULT_MODEL = "gpt-realtime";
+const DEFAULT_MODEL = "gpt-4o-realtime-preview";
+const DEFAULT_API_VERSION = "2025-05-01-preview";
 const DEFAULT_VOICE = "en-US-Ava:DragonHDLatestNeural";
 const TOKEN_TTL_MS = 60_000;
 const START_TIMEOUT_MS = 8_000;
@@ -222,7 +223,8 @@ async function handleClient(client: WsWebSocket): Promise<void> {
   }
 
   const model = process.env["AZURE_VOICE_LIVE_MODEL"] ?? DEFAULT_MODEL;
-  const sdkClient = new VoiceLiveClient(endpoint, new AzureKeyCredential(apiKey));
+  const apiVersion = process.env["AZURE_VOICE_LIVE_API_VERSION"] ?? DEFAULT_API_VERSION;
+  const sdkClient = new VoiceLiveClient(endpoint, new AzureKeyCredential(apiKey), { apiVersion });
   const session: VoiceLiveSession = sdkClient.createSession({ model });
 
   let subscription: VoiceLiveSubscription | null = null;
@@ -257,7 +259,15 @@ async function handleClient(client: WsWebSocket): Promise<void> {
     onServerError: async (event) => {
       const msg = event.error?.message ?? "voice service error";
       logger.warn({ msg }, "voice-live: upstream error");
-      sendJson(client, { type: "error", message: msg });
+      sendJson(client, { type: "error", message: msg.slice(0, 300) });
+    },
+    onDisconnected: async (args) => {
+      const reason = (args as { reason?: string } | undefined)?.reason;
+      const msg = reason && reason.length > 0 ? `upstream disconnected: ${reason}` : "upstream disconnected";
+      logger.warn({ reason }, "voice-live: upstream disconnected");
+      sendJson(client, { type: "error", message: msg.slice(0, 300) });
+      await cleanup();
+      safeClose(client, 1011, "upstream disconnected");
     },
   });
 
@@ -293,8 +303,9 @@ async function handleClient(client: WsWebSocket): Promise<void> {
       },
     });
   } catch (err) {
-    logger.error({ err: (err as Error).message }, "voice-live: session init failed");
-    sendJson(client, { type: "error", message: "session init failed" });
+    const detail = (err as Error).message || "session init failed";
+    logger.error({ err: detail }, "voice-live: session init failed");
+    sendJson(client, { type: "error", message: `session init failed: ${detail}`.slice(0, 300) });
     await cleanup();
     safeClose(client, 1011, "session init failed");
     return;

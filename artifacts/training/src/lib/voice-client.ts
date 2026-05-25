@@ -44,6 +44,7 @@ export class VoiceClient {
   private playQueueEndsAt = 0;
   private outstandingSources: AudioOut[] = [];
   private muted = false;
+  private lastErrorMessage = "";
 
   constructor(
     private readonly agent: AgentConfig,
@@ -64,6 +65,7 @@ export class VoiceClient {
   isMuted(): boolean { return this.muted; }
 
   async start(): Promise<void> {
+    this.lastErrorMessage = "";
     this.setState("connecting");
     try {
       const token = await this.fetchToken();
@@ -185,7 +187,7 @@ export class VoiceClient {
     ws.addEventListener("message", (ev) => this.handleServerMessage(ev.data));
     ws.addEventListener("close", () => {
       if (this.state !== "closing" && this.state !== "closed") {
-        this.events.onError?.("connection closed");
+        this.events.onError?.(this.lastErrorMessage || "connection closed");
         this.setState("closed");
       }
     });
@@ -238,9 +240,12 @@ export class VoiceClient {
       case "assistant_speaking":
         this.events.onSpeakingChange?.(Boolean(msg["value"]));
         break;
-      case "error":
-        this.events.onError?.(String(msg["message"] ?? "voice error"));
+      case "error": {
+        const m = String(msg["message"] ?? "voice error");
+        this.lastErrorMessage = m;
+        this.events.onError?.(m);
         break;
+      }
       default: break;
     }
   }
