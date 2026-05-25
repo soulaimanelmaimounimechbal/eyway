@@ -229,6 +229,7 @@ async function handleClient(client: WsWebSocket): Promise<void> {
 
   let subscription: VoiceLiveSubscription | null = null;
   let closed = false;
+  let responseInFlight = false;
   const cleanup = async () => {
     if (closed) return;
     closed = true;
@@ -242,7 +243,18 @@ async function handleClient(client: WsWebSocket): Promise<void> {
       sendJson(client, { type: "ready" });
     },
     onResponseAudioDelta: async (event) => {
-      if (event.delta) sendJson(client, { type: "audio_delta", delta: event.delta });
+      const d = event.delta as Uint8Array | string | undefined;
+      if (!d) return;
+      let b64: string;
+      if (typeof d === "string") {
+        b64 = d;
+      } else if (d instanceof Uint8Array) {
+        if (d.byteLength === 0) return;
+        b64 = Buffer.from(d).toString("base64");
+      } else {
+        return;
+      }
+      sendJson(client, { type: "audio_delta", delta: b64 });
     },
     onConversationItemInputAudioTranscriptionCompleted: async (event) => {
       sendJson(client, { type: "user_transcript", text: event.transcript ?? "" });
@@ -252,13 +264,30 @@ async function handleClient(client: WsWebSocket): Promise<void> {
     },
     onInputAudioBufferSpeechStarted: async () => {
       sendJson(client, { type: "speech_started" });
-      try { await session.sendEvent({ type: "response.cancel" }); } catch { /* may have no active response */ }
+      if (responseInFlight) {
+        responseInFlight = false;
+        try { await session.sendEvent({ type: "response.cancel" }); } catch { /* noop */ }
+      }
     },
-    onResponseCreated: async () => { sendJson(client, { type: "assistant_speaking", value: true }); },
-    onResponseDone: async () => { sendJson(client, { type: "assistant_speaking", value: false }); },
+    onResponseCreated: async () => {
+      responseInFlight = true;
+      sendJson(client, { type: "assistant_speaking", value: true });
+    },
+    onResponseDone: async () => {
+      responseInFlight = false;
+      sendJson(client, { type: "assistant_speaking", value: false });
+    },
     onServerError: async (event) => {
+      const code = event.error?.code ?? "";
       const msg = event.error?.message ?? "voice service error";
-      logger.warn({ msg }, "voice-live: upstream error");
+      const benign =
+        code === "response_cancel_not_active" ||
+        /no active response/i.test(msg);
+      if (benign) {
+        logger.debug({ code, msg }, "voice-live: benign upstream error suppressed");
+        return;
+      }
+      logger.warn({ code, msg }, "voice-live: upstream error");
       sendJson(client, { type: "error", message: msg.slice(0, 300) });
     },
     onDisconnected: async (args) => {
