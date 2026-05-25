@@ -1,0 +1,227 @@
+Build a modern, responsive web application that simulates a training experience based on the TRACOM Social Styles communication module.
+
+The app should guide a user through a structured end-to-end learning journey with a focus on recognizing and adapting to different communication styles in a client scenario.
+
+Use:
+- Frontend: React (with simple state management)
+- Styling: clean, modern UI (Tailwind or similar)
+- Backend: lightweight Node.js (Express) OR mock API using local state
+- No authentication required
+- Keep everything runnable in Replit
+
+----------------------------------------
+APP PURPOSE
+----------------------------------------
+This is an interactive training simulation for consultants.
+
+The user will:
+1. Understand a client scenario
+2. Select and interact with different client personalities
+3. Practice adapting communication style
+4. Receive an outcome (GREEN / AMBER / RED)
+5. Reflect on their experience
+
+----------------------------------------
+APP FLOW (MUST FOLLOW THIS STRUCTURE)
+----------------------------------------
+
+SCREEN 1 — INTRO / HOOK
+- Title: "Adapting to Different Client Communication Styles"
+- Short description:
+  "Clients communicate differently. Your ability to adapt determines how effective you are."
+- Button: "Start Simulation"
+
+----------------------------------------
+
+SCREEN 2 — SCENARIO BRIEF
+Display this scenario clearly:
+
+Client: Glenara Travel Group  
+Context:
+You are part of an EY team supporting a fast-growing logistics company.
+
+Situation:
+A sustainability report supported by your team has triggered negative internal feedback. While the data is correct, stakeholders believe parts were unclear or misinterpreted.
+
+You are joining a last-minute meeting with a senior stakeholder.
+
+They have a leadership update tomorrow and need:
+- clarity on what happened
+- what they can say
+- what to do next
+
+Your role:
+Respond in real time and adapt your communication style so the client feels:
+- understood
+- supported
+- confident in next steps
+
+Button: "Continue"
+
+----------------------------------------
+
+SCREEN 3 — SELF-REFLECTION
+Simple form:
+
+Question:
+"When under pressure, what is your default communication style?"
+
+Options (radio buttons):
+- Direct / results-focused
+- Detail-oriented / cautious
+- People-focused / supportive
+- Energetic / idea-driven
+
+Optional text input:
+"Describe how you typically respond in difficult client conversations"
+
+Button: "Continue"
+
+----------------------------------------
+
+SCREEN 4 — SELECT CLIENT (4 AGENTS)
+User selects one client to interact with.
+
+Show 4 cards:
+
+1. Analytical
+- Calm, structured, detail-oriented
+- Focuses on accuracy and risk
+
+2. Driving
+- Direct, fast-paced, results-focused
+- Wants decisions and action
+
+3. Expressive
+- Energetic, big-picture
+- Wants clear story and momentum
+
+4. Amiable
+- Warm, relationship-focused
+- Wants trust and reassurance
+
+Button per card: "Start Conversation"
+
+----------------------------------------
+
+SCREEN 5 — CONVERSATION INTERFACE
+
+Chat-style UI:
+- Left: client messages
+- Right: user responses (typed input)
+- Input box + "Send" button
+
+Simulate conversation logic:
+- On start: load the selected agent's system prompt
+- Use a mocked AI function (or placeholder) that responds differently per agent
+
+Implement different behaviors:
+
+Analytical:
+- asks questions
+- requests evidence
+- challenges vague answers
+
+Driving:
+- short, direct responses
+- interrupts (push "What's the plan?")
+- asks for decisions
+
+Expressive:
+- emotional, energetic
+- asks for "the story"
+- disengages if too technical
+
+Amiable:
+- warm, concerned
+- asks about people and trust
+- reacts negatively to abrupt responses
+
+Conversation rules:
+- Limit to 10 turns
+- Track user responses
+- Adapt tone slightly based on keywords
+
+----------------------------------------
+
+SCREEN 6 — OUTCOME
+
+After conversation ends, show:
+
+Result:
+- GREEN: "Client feels confident and aligned"
+- AMBER: "Client is partially reassured"
+- RED: "Client is not confident and may escalate"
+
+Determine result based on:
+- Response length
+- Presence of keywords:
+  - Analytical → "data", "evidence", "assumptions"
+  - Driving → "plan", "next steps", "timeline"
+  - Expressive → "story", "confidence", "message"
+  - Amiable → "team", "support", "trust"
+
+----------------------------------------
+
+SCREEN 7 — REFLECTION
+
+Ask user:
+
+1. "What did you do initially?"
+(text box)
+
+2. "At what point did you realize your approach wasn't working?"
+(text box)
+
+3. "Which client style did you find most challenging?"
+(dropdown)
+
+Button: "Finish"
+
+----------------------------------------
+
+SCREEN 8 — SUMMARY
+
+Display:
+- Selected client style
+- Outcome (GREEN / AMBER / RED)
+- Short feedback tips based on style:
+
+Analytical → "Use data, structure, and clarity"
+Driving → "Be concise and action-oriented"
+Expressive → "Focus on narrative and energy"
+Amiable → "Show empathy and build trust"
+
+Add button:
+"Try another client"
+
+----------------------------------------
+
+TECHNICAL NOTES
+
+- Keep everything in one Replit project
+- Store agent behavior in a config object like:
+
+const agents = {
+  analytical: { tone: "...", behavior: [...] },
+  driving: {...},
+  expressive: {...},
+  amiable: {...}
+}
+
+- No real AI required — simulate responses with rules or templates
+- Make UI clean and minimal
+- Ensure smooth page transitions
+
+----------------------------------------
+
+OPTIONAL (IF POSSIBLE)
+- Add typing animation for client
+- Add "thinking..." delay
+- Add progress bar for steps
+
+----------------------------------------
+
+GOAL
+----------------------------------------
+Create a polished simulation that mimics a real training experience and clearly demonstrates communication adaptation across four client styles.
