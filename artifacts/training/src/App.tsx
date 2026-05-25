@@ -33,8 +33,8 @@ interface SessionResult {
 
 function App() {
   const [step, setStep] = useState<Step>("intro");
-  const [selfData, setSelfData] = useState<SelfReflectionData>({ feeling: "", priority: "", worry: "" });
-  const [reflectData, setReflectData] = useState<ReflectionData>({ worked: "", struggled: "", next: "" });
+  const [selfData, setSelfData] = useState<SelfReflectionData>({ selfStyle: "", note: "" });
+  const [reflectData, setReflectData] = useState<ReflectionData>({ worked: "", next: "", hardestStyle: "" });
   const [style, setStyle] = useState<SocialStyle | null>(null);
   const [result, setResult] = useState<SessionResult | null>(null);
 

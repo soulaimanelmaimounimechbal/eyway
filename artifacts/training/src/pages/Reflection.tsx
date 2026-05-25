@@ -2,12 +2,14 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ProgressDots } from "@/components/ProgressDots";
+import { AGENT_LIST, type SocialStyle } from "@/lib/agents";
 
 export interface ReflectionData {
   worked: string;
-  struggled: string;
   next: string;
+  hardestStyle: SocialStyle | "";
 }
 
 export default function Reflection({
@@ -27,29 +29,37 @@ export default function Reflection({
 
       <main className="flex-1 py-10">
         <h1 className="text-3xl font-semibold sm:text-4xl">How did that feel?</h1>
-        <p className="mt-2 max-w-2xl text-muted-foreground">
-          A short reflection before you see the tips. Honest beats polished.
-        </p>
+        <p className="mt-2 max-w-2xl text-muted-foreground">A short reflection before you see the tips.</p>
 
         <div className="mt-8 space-y-6">
-          <Field label="What worked well in that conversation?" value={data.worked} onChange={(v) => setData({ ...data, worked: v })} testId="input-worked" placeholder="e.g. I gave them a clear next step..." />
-          <Field label="What did you struggle with?" value={data.struggled} onChange={(v) => setData({ ...data, struggled: v })} testId="input-struggled" placeholder="e.g. I kept giving data when they wanted a story..." />
-          <Field label="What will you try differently next time?" value={data.next} onChange={(v) => setData({ ...data, next: v })} testId="input-next" placeholder="e.g. lead with empathy, then move to action..." />
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">What worked well in that conversation?</Label>
+            <Textarea rows={3} value={data.worked} onChange={(e) => setData({ ...data, worked: e.target.value })} data-testid="input-worked" placeholder="e.g. I gave them a clear next step..." />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">What will you try differently next time?</Label>
+            <Textarea rows={3} value={data.next} onChange={(e) => setData({ ...data, next: e.target.value })} data-testid="input-next" placeholder="e.g. lead with empathy, then move to action..." />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Which style do you find most challenging?</Label>
+            <Select
+              value={data.hardestStyle}
+              onValueChange={(v) => setData({ ...data, hardestStyle: v as SocialStyle })}
+            >
+              <SelectTrigger data-testid="select-hardest"><SelectValue placeholder="Pick a style…" /></SelectTrigger>
+              <SelectContent>
+                {AGENT_LIST.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>{a.headline} — {a.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </main>
 
       <footer className="flex items-center justify-end pt-6">
         <Button size="lg" onClick={() => onNext(data)} data-testid="button-continue">See tips</Button>
       </footer>
-    </div>
-  );
-}
-
-function Field({ label, value, onChange, testId, placeholder }: { label: string; value: string; onChange: (v: string) => void; testId: string; placeholder: string }) {
-  return (
-    <div className="space-y-2">
-      <Label className="text-sm font-medium">{label}</Label>
-      <Textarea rows={3} value={value} onChange={(e) => onChange(e.target.value)} data-testid={testId} placeholder={placeholder} />
     </div>
   );
 }

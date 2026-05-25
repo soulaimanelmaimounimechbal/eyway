@@ -2,12 +2,14 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ProgressDots } from "@/components/ProgressDots";
+import type { SocialStyle } from "@/lib/agents";
+import { AGENT_LIST } from "@/lib/agents";
 
 export interface SelfReflectionData {
-  feeling: string;
-  priority: string;
-  worry: string;
+  selfStyle: SocialStyle | "";
+  note: string;
 }
 
 export default function SelfReflection({
@@ -20,6 +22,7 @@ export default function SelfReflection({
   onBack: () => void;
 }) {
   const [data, setData] = useState<SelfReflectionData>(initial);
+  const canContinue = data.selfStyle !== "";
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col p-6 sm:p-10">
@@ -31,58 +34,59 @@ export default function SelfReflection({
       <main className="flex-1 py-10">
         <h1 className="text-3xl font-semibold sm:text-4xl">Before you walk in</h1>
         <p className="mt-2 max-w-2xl text-muted-foreground">
-          Take a beat. Notice what's actually going on for you before this conversation. There are
-          no right answers — this is for you.
+          A quick gut check so you can compare how you usually show up against how you actually
+          adapt in the call.
         </p>
 
-        <div className="mt-8 space-y-6">
-          <Field
-            label="How are you feeling right now about this call?"
-            placeholder="e.g. anxious, prepared, defensive..."
-            value={data.feeling}
-            onChange={(v) => setData({ ...data, feeling: v })}
-            testId="input-feeling"
-          />
-          <Field
-            label="What's the one thing you most want from this conversation?"
-            placeholder="e.g. they trust the report; we agree on a plan; they calm down..."
-            value={data.priority}
-            onChange={(v) => setData({ ...data, priority: v })}
-            testId="input-priority"
-          />
-          <Field
-            label="What are you most worried might go wrong?"
-            placeholder="e.g. they don't listen; I get blamed; I freeze..."
-            value={data.worry}
-            onChange={(v) => setData({ ...data, worry: v })}
-            testId="input-worry"
-          />
+        <div className="mt-8 space-y-8">
+          <div className="space-y-4">
+            <Label className="text-sm font-medium">
+              Which Social Style do you think is <span className="underline">most like you</span>?
+              <span className="ml-1 text-destructive">*</span>
+            </Label>
+            <RadioGroup
+              value={data.selfStyle}
+              onValueChange={(v) => setData({ ...data, selfStyle: v as SocialStyle })}
+              className="grid gap-3 sm:grid-cols-2"
+            >
+              {AGENT_LIST.map((a) => (
+                <label
+                  key={a.id}
+                  htmlFor={`self-${a.id}`}
+                  className="flex cursor-pointer items-start gap-3 rounded-xl border bg-card p-4 shadow-sm hover-elevate"
+                  data-testid={`radio-self-${a.id}`}
+                >
+                  <RadioGroupItem id={`self-${a.id}`} value={a.id} className="mt-1" />
+                  <div>
+                    <div className="font-semibold">{a.headline}</div>
+                    <div className="text-sm text-muted-foreground">{a.bullets[0]}</div>
+                  </div>
+                </label>
+              ))}
+            </RadioGroup>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">
+              Anything else on your mind before this call? <span className="text-muted-foreground">(optional)</span>
+            </Label>
+            <Textarea
+              value={data.note}
+              onChange={(e) => setData({ ...data, note: e.target.value })}
+              rows={3}
+              placeholder="e.g. I'm nervous they'll think it's our fault, I want to keep the relationship..."
+              data-testid="input-note"
+            />
+          </div>
         </div>
       </main>
 
       <footer className="flex items-center justify-between pt-6">
         <span className="text-xs text-muted-foreground">Your answers stay on this device.</span>
-        <Button size="lg" onClick={() => onNext(data)} data-testid="button-continue">
+        <Button size="lg" onClick={() => onNext(data)} disabled={!canContinue} data-testid="button-continue">
           Continue
         </Button>
       </footer>
-    </div>
-  );
-}
-
-function Field({
-  label, placeholder, value, onChange, testId,
-}: { label: string; placeholder: string; value: string; onChange: (v: string) => void; testId: string }) {
-  return (
-    <div className="space-y-2">
-      <Label className="text-sm font-medium">{label}</Label>
-      <Textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        rows={3}
-        data-testid={testId}
-      />
     </div>
   );
 }

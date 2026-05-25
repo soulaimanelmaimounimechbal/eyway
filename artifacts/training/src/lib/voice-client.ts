@@ -1,4 +1,4 @@
-import type { SocialStyle, AgentConfig } from "./agents";
+import type { AgentConfig, SocialStyle } from "./agents";
 
 const SAMPLE_RATE = 24000;
 
@@ -13,6 +13,7 @@ export interface VoiceClientEvents {
   onTranscript?: (t: TranscriptEntry[]) => void;
   onError?: (err: string) => void;
   onSpeakingChange?: (assistantSpeaking: boolean) => void;
+  onMicLevel?: (level: number) => void;
 }
 
 export type VoiceState =
@@ -34,6 +35,9 @@ export class VoiceClient {
   private ctx: AudioContext | null = null;
   private playCtx: AudioContext | null = null;
   private workletNode: AudioWorkletNode | null = null;
+  private analyser: AnalyserNode | null = null;
+  private analyserBuf: Float32Array | null = null;
+  private analyserRaf: number | null = null;
   private micStream: MediaStream | null = null;
   private state: VoiceState = "idle";
   private transcript: TranscriptEntry[] = [];
@@ -41,6 +45,7 @@ export class VoiceClient {
   private currentUserText = "";
   private playQueueEndsAt = 0;
   private outstandingSources: AudioOut[] = [];
+  private muted = false;
 
   constructor(
     private readonly agent: AgentConfig,
@@ -51,11 +56,21 @@ export class VoiceClient {
     return this.transcript;
   }
 
+  setMuted(m: boolean) {
+    this.muted = m;
+    if (this.micStream) {
+      this.micStream.getAudioTracks().forEach((t) => { t.enabled = !m; });
+    }
+  }
+
+  isMuted(): boolean { return this.muted; }
+
   async start(): Promise<void> {
     this.setState("connecting");
     try {
+      const token = await this.fetchToken();
       await this.setupAudio();
-      await this.openSocket();
+      await this.openSocket(token);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.events.onError?.(msg);
@@ -69,19 +84,14 @@ export class VoiceClient {
     this.setState("closing");
     try { this.ws?.close(); } catch {}
     this.ws = null;
-    if (this.workletNode) {
-      try { this.workletNode.disconnect(); } catch {}
-      this.workletNode = null;
+    if (this.analyserRaf != null) {
+      cancelAnimationFrame(this.analyserRaf);
+      this.analyserRaf = null;
     }
-    if (this.micStream) {
-      this.micStream.getTracks().forEach((t) => t.stop());
-      this.micStream = null;
-    }
-    if (this.ctx) {
-      try { await this.ctx.close(); } catch {}
-      this.ctx = null;
-    }
-    // Let any queued audio play out, then close playback context
+    if (this.workletNode) { try { this.workletNode.disconnect(); } catch {} this.workletNode = null; }
+    if (this.analyser) { try { this.analyser.disconnect(); } catch {} this.analyser = null; }
+    if (this.micStream) { this.micStream.getTracks().forEach((t) => t.stop()); this.micStream = null; }
+    if (this.ctx) { try { await this.ctx.close(); } catch {} this.ctx = null; }
     if (this.playCtx) {
       const now = this.playCtx.currentTime;
       const wait = Math.max(0, this.playQueueEndsAt - now) * 1000 + 200;
@@ -97,14 +107,17 @@ export class VoiceClient {
     this.events.onStateChange?.(s);
   }
 
+  private async fetchToken(): Promise<string> {
+    const r = await fetch("/api/voice-live/token", { method: "POST" });
+    if (!r.ok) throw new Error(`could not start session (${r.status})`);
+    const j = (await r.json()) as { token: string };
+    if (!j.token) throw new Error("invalid session token");
+    return j.token;
+  }
+
   private async setupAudio() {
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
     this.micStream = stream;
 
@@ -114,34 +127,49 @@ export class VoiceClient {
     await ctx.audioWorklet.addModule(workletUrl);
 
     const source = ctx.createMediaStreamSource(stream);
+
+    // Analyser for mic level meter
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    this.analyser = analyser;
+    this.analyserBuf = new Float32Array(analyser.fftSize);
+    source.connect(analyser);
+
     const node = new AudioWorkletNode(ctx, "pcm-processor", {
-      numberOfInputs: 1,
-      numberOfOutputs: 0,
-      channelCount: 1,
-      channelCountMode: "explicit",
+      numberOfInputs: 1, numberOfOutputs: 0,
+      channelCount: 1, channelCountMode: "explicit",
     });
     this.workletNode = node;
-
-    node.port.onmessage = (ev) => {
-      const data = ev.data as Int16Array;
-      this.sendAudioChunk(data);
-    };
-
+    node.port.onmessage = (ev) => { this.sendAudioChunk(ev.data as Int16Array); };
     source.connect(node);
 
-    // Separate context for playback so we can resume independently
     this.playCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
-    if (this.playCtx.state === "suspended") {
-      try { await this.playCtx.resume(); } catch { /* noop */ }
-    }
-    if (ctx.state === "suspended") {
-      try { await ctx.resume(); } catch { /* noop */ }
-    }
+    if (this.playCtx.state === "suspended") { try { await this.playCtx.resume(); } catch {} }
+    if (ctx.state === "suspended") { try { await ctx.resume(); } catch {} }
+
+    this.startLevelLoop();
   }
 
-  private async openSocket() {
+  private startLevelLoop() {
+    const tick = () => {
+      const a = this.analyser;
+      const buf = this.analyserBuf;
+      if (a && buf) {
+        a.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        const rms = Math.sqrt(sum / buf.length);
+        const level = this.muted ? 0 : Math.min(1, rms * 4);
+        this.events.onMicLevel?.(level);
+      }
+      this.analyserRaf = requestAnimationFrame(tick);
+    };
+    this.analyserRaf = requestAnimationFrame(tick);
+  }
+
+  private async openSocket(token: string) {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${proto}//${location.host}/api/voice-live`;
+    const url = `${proto}//${location.host}/api/voice-live?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
@@ -165,8 +193,7 @@ export class VoiceClient {
       }
     });
 
-    // Configure the session with persona instructions, voice, VAD, and transcription
-    const sessionUpdate = {
+    ws.send(JSON.stringify({
       type: "session.update",
       session: {
         modalities: ["audio", "text"],
@@ -176,29 +203,17 @@ export class VoiceClient {
         output_audio_format: "pcm16",
         input_audio_transcription: { model: "whisper-1" },
         turn_detection: {
-          type: "server_vad",
-          threshold: 0.5,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 600,
-          create_response: true,
+          type: "server_vad", threshold: 0.5, prefix_padding_ms: 300,
+          silence_duration_ms: 600, create_response: true,
         },
       },
-    };
-    ws.send(JSON.stringify(sessionUpdate));
-
-    // Seed the assistant's first message so it speaks before the user does.
-    const greeting = {
+    }));
+    ws.send(JSON.stringify({
       type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "assistant",
-        content: [{ type: "text", text: this.agent.greeting }],
-      },
-    };
-    ws.send(JSON.stringify(greeting));
+      item: { type: "message", role: "assistant", content: [{ type: "text", text: this.agent.greeting }] },
+    }));
     ws.send(JSON.stringify({ type: "response.create", response: { modalities: ["audio", "text"] } }));
 
-    // Reflect the greeting in the local transcript immediately.
     this.transcript.push({ role: "assistant", text: this.agent.greeting, done: true });
     this.events.onTranscript?.([...this.transcript]);
 
@@ -206,16 +221,15 @@ export class VoiceClient {
   }
 
   private sendAudioChunk(pcm: Int16Array) {
+    if (this.muted) return;
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    // Convert Int16Array to base64
     const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
     let bin = "";
     const CHUNK = 0x8000;
     for (let i = 0; i < bytes.length; i += CHUNK) {
       bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)) as number[]);
     }
-    const b64 = btoa(bin);
-    this.ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: b64 }));
+    this.ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: btoa(bin) }));
   }
 
   private handleAzureMessage(raw: unknown) {
@@ -223,104 +237,73 @@ export class VoiceClient {
     try {
       const txt = typeof raw === "string" ? raw : new TextDecoder().decode(raw as ArrayBuffer);
       msg = JSON.parse(txt);
-    } catch {
-      return;
-    }
+    } catch { return; }
     switch (msg.type) {
-      case "response.audio.delta": {
+      case "response.audio.delta":
         if (typeof msg.delta === "string") this.playAudioChunk(msg.delta);
         break;
-      }
-      case "response.audio_transcript.delta": {
+      case "response.audio_transcript.delta":
         if (typeof msg.delta === "string") {
           this.currentAssistantText += msg.delta;
           this.upsertCurrentAssistant();
         }
         break;
-      }
       case "response.audio_transcript.done":
-      case "response.output_item.done": {
-        if (this.currentAssistantText.trim().length > 0) {
-          this.commitAssistant();
-        }
+      case "response.output_item.done":
+        if (this.currentAssistantText.trim().length > 0) this.commitAssistant();
         break;
-      }
-      case "conversation.item.input_audio_transcription.delta": {
+      case "conversation.item.input_audio_transcription.delta":
         if (typeof msg.delta === "string") {
           this.currentUserText += msg.delta;
           this.upsertCurrentUser();
         }
         break;
-      }
-      case "conversation.item.input_audio_transcription.completed": {
+      case "conversation.item.input_audio_transcription.completed":
         if (typeof msg.transcript === "string") {
           this.currentUserText = msg.transcript;
           this.commitUser();
         }
         break;
-      }
-      case "input_audio_buffer.speech_started": {
+      case "input_audio_buffer.speech_started":
         this.events.onSpeakingChange?.(false);
         break;
-      }
-      case "response.created": {
+      case "response.created":
         this.events.onSpeakingChange?.(true);
         break;
-      }
-      case "response.done": {
+      case "response.done":
         if (this.currentAssistantText.trim().length > 0) this.commitAssistant();
         this.events.onSpeakingChange?.(false);
         break;
-      }
-      case "error": {
-        const message = msg.error?.message ?? "voice error";
-        this.events.onError?.(String(message));
+      case "error":
+        this.events.onError?.(String(msg.error?.message ?? "voice error"));
         break;
-      }
       default: break;
     }
   }
 
   private upsertCurrentAssistant() {
     const last = this.transcript[this.transcript.length - 1];
-    if (last && last.role === "assistant" && !last.done) {
-      last.text = this.currentAssistantText;
-    } else {
-      this.transcript.push({ role: "assistant", text: this.currentAssistantText, done: false });
-    }
+    if (last && last.role === "assistant" && !last.done) last.text = this.currentAssistantText;
+    else this.transcript.push({ role: "assistant", text: this.currentAssistantText, done: false });
     this.events.onTranscript?.([...this.transcript]);
   }
-
   private commitAssistant() {
     const last = this.transcript[this.transcript.length - 1];
-    if (last && last.role === "assistant" && !last.done) {
-      last.text = this.currentAssistantText;
-      last.done = true;
-    } else {
-      this.transcript.push({ role: "assistant", text: this.currentAssistantText, done: true });
-    }
+    if (last && last.role === "assistant" && !last.done) { last.text = this.currentAssistantText; last.done = true; }
+    else this.transcript.push({ role: "assistant", text: this.currentAssistantText, done: true });
     this.currentAssistantText = "";
     this.events.onTranscript?.([...this.transcript]);
   }
-
   private upsertCurrentUser() {
     const last = this.transcript[this.transcript.length - 1];
-    if (last && last.role === "user" && !last.done) {
-      last.text = this.currentUserText;
-    } else {
-      this.transcript.push({ role: "user", text: this.currentUserText, done: false });
-    }
+    if (last && last.role === "user" && !last.done) last.text = this.currentUserText;
+    else this.transcript.push({ role: "user", text: this.currentUserText, done: false });
     this.events.onTranscript?.([...this.transcript]);
   }
-
   private commitUser() {
     const last = this.transcript[this.transcript.length - 1];
-    if (last && last.role === "user" && !last.done) {
-      last.text = this.currentUserText;
-      last.done = true;
-    } else {
-      this.transcript.push({ role: "user", text: this.currentUserText, done: true });
-    }
+    if (last && last.role === "user" && !last.done) { last.text = this.currentUserText; last.done = true; }
+    else this.transcript.push({ role: "user", text: this.currentUserText, done: true });
     this.currentUserText = "";
     this.events.onTranscript?.([...this.transcript]);
   }
@@ -329,10 +312,9 @@ export class VoiceClient {
     if (!this.playCtx) return;
     try {
       const bin = atob(b64);
-      const len = bin.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
-      const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, len / 2);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, bin.length / 2);
       const float = new Float32Array(pcm.length);
       for (let i = 0; i < pcm.length; i++) float[i] = pcm[i] / 0x8000;
 
@@ -348,12 +330,8 @@ export class VoiceClient {
       this.playQueueEndsAt = endsAt;
       const entry: AudioOut = { source: src, endsAt };
       this.outstandingSources.push(entry);
-      src.onended = () => {
-        this.outstandingSources = this.outstandingSources.filter((e) => e !== entry);
-      };
-    } catch {
-      // ignore decode errors
-    }
+      src.onended = () => { this.outstandingSources = this.outstandingSources.filter((e) => e !== entry); };
+    } catch { /* ignore */ }
   }
 }
 
@@ -361,25 +339,27 @@ export function scoreTranscript(
   transcript: TranscriptEntry[],
   style: SocialStyle,
   agentKeywords: string[],
-): { tier: "green" | "amber" | "red"; hits: string[]; userTurns: number } {
-  const userText = transcript
-    .filter((t) => t.role === "user" && t.done)
-    .map((t) => t.text.toLowerCase())
-    .join(" ");
-  const userTurns = transcript.filter((t) => t.role === "user" && t.done && t.text.trim().length > 0).length;
+): { tier: "green" | "amber" | "red"; hits: string[]; userTurns: number; avgWords: number } {
+  void style;
+  const userEntries = transcript.filter((t) => t.role === "user" && t.done && t.text.trim().length > 0);
+  const userText = userEntries.map((t) => t.text.toLowerCase()).join(" ");
+  const userTurns = userEntries.length;
+  const totalWords = userEntries.reduce((sum, t) => sum + t.text.trim().split(/\s+/).length, 0);
+  const avgWords = userTurns === 0 ? 0 : totalWords / userTurns;
   const hits = Array.from(new Set(agentKeywords.filter((k) => userText.includes(k.toLowerCase()))));
-  // Tier rules
+
+  // Tier rules combine keyword adaptation + substantive (long enough) responses.
   let tier: "green" | "amber" | "red";
-  if (userTurns < 2) {
+  if (userTurns < 2 || avgWords < 4) {
     tier = "red";
-  } else if (hits.length >= 3 && userTurns >= 3) {
+  } else if (hits.length >= 3 && userTurns >= 3 && avgWords >= 10) {
     tier = "green";
+  } else if (hits.length >= 1 && avgWords >= 6) {
+    tier = "amber";
   } else if (hits.length >= 1) {
     tier = "amber";
   } else {
     tier = "red";
   }
-  // referenced to silence "unused" lint warnings in some checks
-  void style;
-  return { tier, hits, userTurns };
+  return { tier, hits, userTurns, avgWords };
 }
