@@ -3,8 +3,15 @@ import { Button } from "@/components/ui/button";
 import { ProgressDots } from "@/components/ProgressDots";
 import { AGENTS, type SocialStyle } from "@/lib/agents";
 import { VoiceClient, type TranscriptEntry, type VoiceState } from "@/lib/voice-client";
-import { Mic, MicOff, PhoneOff, Loader2, MessageSquareWarning } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Loader2, MessageSquareWarning, Lightbulb, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  evaluateTurn,
+  pickNudge,
+  TURN_SIGNAL_CLASSES,
+  type CoachingNudge,
+  type TurnEvaluation,
+} from "@/lib/coaching";
 
 const MAX_TURNS = 10;
 const MAX_SECONDS = 300;
@@ -39,6 +46,11 @@ export default function Conversation({
   const [muted, setMuted] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [warningShownAt30s, setWarningShownAt30s] = useState(false);
+  const [showSignals, setShowSignals] = useState(true);
+  const [nudge, setNudge] = useState<CoachingNudge | null>(null);
+  const firedNudgesRef = useRef<Set<string>>(new Set());
+  const lastNudgeAtRef = useRef(0);
+  const nudgeDismissTimerRef = useRef<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
   const endedRef = useRef(false);
 
@@ -84,7 +96,52 @@ export default function Conversation({
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [transcript]);
 
-  const userTurns = transcript.filter((t) => t.role === "user" && t.done && t.text.trim()).length;
+  const completedUserTurns = useMemo(
+    () => transcript.filter((t) => t.role === "user" && t.done && t.text.trim()),
+    [transcript],
+  );
+  const userTurns = completedUserTurns.length;
+
+  // Per-turn evaluations (memoised so the transcript map doesn't recompute
+  // for every animation-frame state change).
+  const turnEvalsByText = useMemo(() => {
+    const m = new Map<string, TurnEvaluation>();
+    for (const t of completedUserTurns) m.set(t.text, evaluateTurn(t, agent));
+    return m;
+  }, [completedUserTurns, agent]);
+
+  // Coaching nudge: fire after every 2 user turns when the last two were
+  // both off-style, with a 30s cool-down and never repeat the same nudge.
+  useEffect(() => {
+    if (userTurns < 2 || userTurns % 2 !== 0) return;
+    if (assistantSpeaking) return; // wait until the assistant has finished
+    if (nudge) return; // one nudge on screen at a time
+    if (Date.now() - lastNudgeAtRef.current < 30_000) return;
+    const candidate = pickNudge(completedUserTurns, agent, firedNudgesRef.current);
+    if (!candidate) return;
+    firedNudgesRef.current.add(candidate.id);
+    lastNudgeAtRef.current = Date.now();
+    setNudge(candidate);
+    if (nudgeDismissTimerRef.current) window.clearTimeout(nudgeDismissTimerRef.current);
+    nudgeDismissTimerRef.current = window.setTimeout(() => {
+      setNudge(null);
+      nudgeDismissTimerRef.current = null;
+    }, 12_000);
+  }, [userTurns, assistantSpeaking, nudge, completedUserTurns, agent]);
+
+  useEffect(() => {
+    return () => {
+      if (nudgeDismissTimerRef.current) window.clearTimeout(nudgeDismissTimerRef.current);
+    };
+  }, []);
+
+  function dismissNudge() {
+    setNudge(null);
+    if (nudgeDismissTimerRef.current) {
+      window.clearTimeout(nudgeDismissTimerRef.current);
+      nudgeDismissTimerRef.current = null;
+    }
+  }
   const remaining = Math.max(0, MAX_SECONDS - seconds);
   const timeUp = remaining <= 0;
   const turnsUp = userTurns >= MAX_TURNS;
@@ -210,9 +267,20 @@ export default function Conversation({
         <div className="grid flex-1 gap-4 md:grid-cols-[1fr_300px]">
           <div className="rounded-2xl border bg-card p-4 shadow-sm">
             <div className="flex h-full max-h-[55vh] flex-col">
-              <div className="mb-3 flex items-center justify-between">
+              <div className="mb-3 flex items-center justify-between gap-3">
                 <h3 className="text-sm font-semibold">Live transcript</h3>
-                <AssistantVisualizer level={assistantLevel} active={assistantSpeaking} />
+                <div className="flex items-center gap-3">
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-medium text-muted-foreground" data-testid="toggle-signals">
+                    <input
+                      type="checkbox"
+                      className="h-3 w-3 cursor-pointer accent-primary"
+                      checked={showSignals}
+                      onChange={(e) => setShowSignals(e.target.checked)}
+                    />
+                    Show signals
+                  </label>
+                  <AssistantVisualizer level={assistantLevel} active={assistantSpeaking} />
+                </div>
               </div>
               <div className="flex-1 space-y-3 overflow-y-auto pr-2" data-testid="transcript-list">
                 {transcript.length === 0 && (
@@ -220,23 +288,34 @@ export default function Conversation({
                     Connecting and warming up your microphone…
                   </div>
                 )}
-                {transcript.map((t, i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      "rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
-                      t.role === "assistant"
-                        ? "bg-secondary text-secondary-foreground"
-                        : "ml-6 bg-primary text-primary-foreground",
-                      !t.done && "opacity-70 italic",
-                    )}
-                  >
-                    <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider opacity-70">
-                      {t.role === "assistant" ? agent.name : "You"}
+                {transcript.map((t, i) => {
+                  const evalForTurn = t.role === "user" && t.done ? turnEvalsByText.get(t.text) : undefined;
+                  const sig = evalForTurn?.signal;
+                  return (
+                    <div
+                      key={i}
+                      className={cn(
+                        "rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
+                        t.role === "assistant"
+                          ? "bg-secondary text-secondary-foreground"
+                          : "ml-6 bg-primary text-primary-foreground",
+                        !t.done && "opacity-70 italic",
+                      )}
+                    >
+                      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider opacity-70">
+                        {showSignals && sig && (
+                          <span
+                            className={cn("inline-block h-1.5 w-1.5 rounded-full", TURN_SIGNAL_CLASSES[sig].dot)}
+                            data-testid={`turn-signal-${sig}`}
+                            title={`Signal: ${TURN_SIGNAL_CLASSES[sig].label}`}
+                          />
+                        )}
+                        <span>{t.role === "assistant" ? agent.name : "You"}</span>
+                      </div>
+                      {t.text || "…"}
                     </div>
-                    {t.text || "…"}
-                  </div>
-                ))}
+                  );
+                })}
                 <div ref={transcriptEndRef} />
               </div>
               {pinnedAssistantText && (
@@ -297,17 +376,43 @@ export default function Conversation({
                 </div>
               )}
             </div>
-            <div className="rounded-2xl border bg-card p-4 shadow-sm">
-              <h4 className="text-sm font-semibold">Guidance</h4>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Speak naturally — there's no push-to-talk. Pause to let them respond.
-              </p>
-              <ul className="mt-3 space-y-1.5 text-xs text-muted-foreground">
-                <li>· Up to {MAX_TURNS} of your turns or 5 minutes</li>
-                <li>· End the call whenever you feel done</li>
-                <li>· They react to your style, not just your words</li>
-              </ul>
-            </div>
+            {nudge ? (
+              <div
+                className="rounded-2xl border border-primary/40 bg-primary/5 p-4 shadow-sm"
+                data-testid="coaching-nudge"
+                data-nudge-id={nudge.id}
+                role="status"
+                aria-live="polite"
+              >
+                <div className="flex items-start gap-2">
+                  <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <div className="flex-1">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-primary">Coaching nudge</div>
+                    <p className="mt-1 text-sm leading-snug text-foreground">{nudge.text}</p>
+                  </div>
+                  <button
+                    onClick={dismissNudge}
+                    className="rounded p-1 text-muted-foreground hover-elevate"
+                    aria-label="Dismiss nudge"
+                    data-testid="button-dismiss-nudge"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border bg-card p-4 shadow-sm">
+                <h4 className="text-sm font-semibold">Guidance</h4>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Speak naturally — there's no push-to-talk. Pause to let them respond.
+                </p>
+                <ul className="mt-3 space-y-1.5 text-xs text-muted-foreground">
+                  <li>· Up to {MAX_TURNS} of your turns or 5 minutes</li>
+                  <li>· End the call whenever you feel done</li>
+                  <li>· They react to your style, not just your words</li>
+                </ul>
+              </div>
+            )}
           </aside>
         </div>
 

@@ -31,6 +31,7 @@ interface SessionResult {
   tier: Tier;
   hits: string[];
   userTurns: number;
+  transcript: TranscriptEntry[];
 }
 
 function App() {
@@ -88,7 +89,7 @@ function App() {
             onDone={(transcript: TranscriptEntry[]) => {
               const agent = AGENTS[style];
               const scored = scoreTranscript(transcript, style, agent.keywords);
-              setResult(scored);
+              setResult({ ...scored, transcript });
               setStep("outcome");
             }}
           />
@@ -101,7 +102,10 @@ function App() {
             tier={result.tier}
             hits={result.hits}
             userTurns={result.userTurns}
+            transcript={result.transcript}
             onNext={() => setStep("reflection")}
+            onTrySame={() => { setResult(null); setStep("preflight"); }}
+            onTryDifferent={() => { setResult(null); setStyle(null); setStep("select"); }}
           />
         );
       case "reflection":
