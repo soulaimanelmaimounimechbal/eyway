@@ -306,6 +306,10 @@ export class VoiceClient {
         const m = String(msg["message"] ?? "voice error");
         const k = (msg["kind"] as ErrorKind | undefined) ?? "fatal";
         this.lastErrorMessage = m;
+        // For lost_connection we hold the error until the close handler has
+        // decided whether reconnect succeeded — otherwise users would see a
+        // red banner during a recovery we are about to complete silently.
+        if (k === "lost_connection") break;
         this.errorEmittedForCurrentSession = true;
         this.events.onError?.(m, k);
         break;
@@ -368,7 +372,10 @@ export interface MicCheckResult {
   message?: string;
 }
 
-export async function runMicCheck(durationMs = 2000): Promise<MicCheckResult> {
+export async function runMicCheck(
+  durationMs = 2000,
+  onLevel?: (level: number) => void,
+): Promise<MicCheckResult> {
   if (!navigator.mediaDevices?.getUserMedia) {
     return { ok: false, permission: "unavailable", peakLevel: 0, message: "Microphone API unavailable in this browser." };
   }
@@ -409,6 +416,7 @@ export async function runMicCheck(durationMs = 2000): Promise<MicCheckResult> {
     const rms = Math.sqrt(sum / buf.length);
     const level = Math.min(1, rms * 4);
     if (level > peak) peak = level;
+    onLevel?.(level);
   };
   const start = Date.now();
   await new Promise<void>((resolve) => {
@@ -417,6 +425,7 @@ export async function runMicCheck(durationMs = 2000): Promise<MicCheckResult> {
       if (Date.now() - start >= durationMs) { clearInterval(id); resolve(); }
     }, 50);
   });
+  onLevel?.(0);
 
   try { src.disconnect(); } catch { /* noop */ }
   try { analyser.disconnect(); } catch { /* noop */ }

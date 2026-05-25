@@ -32,6 +32,7 @@ export default function Preflight({
   const [token, setToken] = useState<CheckState>(INITIAL);
   const [probe, setProbe] = useState<CheckState>(INITIAL);
   const [running, setRunning] = useState(false);
+  const [liveLevel, setLiveLevel] = useState(0);
   const runRef = useRef(0);
 
   const allPass =
@@ -48,7 +49,7 @@ export default function Preflight({
     setToken(INITIAL);
     setProbe(INITIAL);
 
-    const micResult = await runMicCheck(0);
+    const micResult = await runMicCheck(0, undefined);
     if (myRun !== runRef.current) return;
     if (!micResult.ok && micResult.permission !== "granted") {
       setMic({ status: "fail", detail: micResult.message });
@@ -58,7 +59,11 @@ export default function Preflight({
     setMic({ status: "pass", detail: "Microphone access granted." });
 
     setSelfTest({ status: "running", detail: "Say a few words — listening for 2 seconds…" });
-    const self = await runMicCheck(2000);
+    setLiveLevel(0);
+    const self = await runMicCheck(2000, (lvl) => {
+      if (myRun === runRef.current) setLiveLevel(lvl);
+    });
+    setLiveLevel(0);
     if (myRun !== runRef.current) return;
     if (!self.ok) {
       setSelfTest({
@@ -147,7 +152,17 @@ export default function Preflight({
 
         <ol className="mt-6 space-y-3" data-testid="preflight-list">
           <CheckRow index={1} title="Microphone permission" state={mic} icon={<Mic className="h-4 w-4" />} testId="check-mic" />
-          <CheckRow index={2} title="Mic self-test (2-second listen)" state={selfTest} testId="check-self-test" />
+          <CheckRow
+            index={2}
+            title="Mic self-test (2-second listen)"
+            state={selfTest}
+            testId="check-self-test"
+            extra={
+              selfTest.status === "running" ? (
+                <LevelMeter level={liveLevel} />
+              ) : null
+            }
+          />
           <CheckRow index={3} title="Session token" state={token} testId="check-token" />
           <CheckRow index={4} title="Voice service probe" state={probe} testId="check-probe" />
         </ol>
@@ -184,18 +199,46 @@ export default function Preflight({
   );
 }
 
+function LevelMeter({ level }: { level: number }) {
+  const pct = Math.round(Math.min(1, Math.max(0, level)) * 100);
+  const FLOOR_PCT = 3;
+  return (
+    <div className="mt-2" data-testid="mic-level-meter" data-level={pct}>
+      <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn(
+            "h-full rounded-full transition-[width] duration-75",
+            pct >= FLOOR_PCT ? "bg-emerald-500" : "bg-amber-500",
+          )}
+          style={{ width: `${pct}%` }}
+        />
+        <div
+          className="absolute inset-y-0 w-px bg-foreground/40"
+          style={{ left: `${FLOOR_PCT}%` }}
+          aria-hidden
+        />
+      </div>
+      <div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+        Live level · {pct}% (needs ≥ {FLOOR_PCT}%)
+      </div>
+    </div>
+  );
+}
+
 function CheckRow({
   index,
   title,
   state,
   icon,
   testId,
+  extra,
 }: {
   index: number;
   title: string;
   state: CheckState;
   icon?: React.ReactNode;
   testId: string;
+  extra?: React.ReactNode;
 }) {
   return (
     <li
@@ -233,6 +276,7 @@ function CheckRow({
             {state.detail}
           </div>
         )}
+        {extra}
       </div>
     </li>
   );

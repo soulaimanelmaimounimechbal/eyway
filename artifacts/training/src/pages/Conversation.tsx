@@ -37,7 +37,11 @@ export default function Conversation({
 
   useEffect(() => {
     const c = new VoiceClient(agent, {
-      onStateChange: setState,
+      onStateChange: (s) => {
+        setState(s);
+        // Clear stale errors when we recover and are back on the call.
+        if (s === "listening" || s === "reconnecting") setError(null);
+      },
       onTranscript: setTranscript,
       onError: (msg, kind) => {
         if (kind === "config") {
@@ -100,7 +104,11 @@ export default function Conversation({
     setMuted(next);
   }
 
-  const canEnd = userTurns >= 1;
+  // Always allow ending once the connection has terminated (closed/error),
+  // even with zero user turns, so a failed reconnect can still route to
+  // outcome/review with whatever transcript we captured.
+  const isTerminal = state === "closed" || state === "error";
+  const canEnd = userTurns >= 1 || isTerminal;
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col p-6 sm:p-10">
@@ -231,10 +239,11 @@ export default function Conversation({
           size="lg"
           variant="destructive"
           onClick={() => { endedRef.current = true; void handleEnd(); }}
-          disabled={!canEnd && state !== "error"}
+          disabled={!canEnd}
           data-testid="button-end-call"
         >
-          <PhoneOff className="mr-2 h-4 w-4" /> End call
+          <PhoneOff className="mr-2 h-4 w-4" />
+          {isTerminal && userTurns === 0 ? "Review what we captured" : "End call"}
         </Button>
       </footer>
     </div>
