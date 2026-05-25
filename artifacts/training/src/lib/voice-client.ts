@@ -15,6 +15,8 @@ export interface VoiceClientEvents {
   onWarning?: (msg: string, kind?: WarningKind) => void;
   onSpeakingChange?: (assistantSpeaking: boolean) => void;
   onMicLevel?: (level: number) => void;
+  onAssistantLevel?: (level: number) => void;
+  onSilenceHint?: (silent: boolean) => void;
 }
 
 export type VoiceState =
@@ -56,6 +58,10 @@ export class VoiceClient {
   private reconnectAttempted = false;
   private stopping = false;
   private errorEmittedForCurrentSession = false;
+  private lastInputAboveFloorAt = 0;
+  private silenceHintActive = false;
+  private lastMicLevelEmitAt = 0;
+  private assistantLevelTimers: ReturnType<typeof setTimeout>[] = [];
 
   constructor(
     private readonly agent: AgentConfig,
@@ -70,6 +76,14 @@ export class VoiceClient {
     this.muted = m;
     if (this.micStream) {
       this.micStream.getAudioTracks().forEach((t) => { t.enabled = !m; });
+    }
+    // Muting can't be "no input we missed" — clear any stale silence hint.
+    if (m && this.silenceHintActive) {
+      this.silenceHintActive = false;
+      this.events.onSilenceHint?.(false);
+    }
+    if (!m) {
+      this.lastInputAboveFloorAt = Date.now();
     }
   }
 
@@ -96,6 +110,11 @@ export class VoiceClient {
     this.setState("closing");
     try { this.ws?.close(); } catch {}
     this.ws = null;
+    this.clearAssistantLevelTimers();
+    if (this.silenceHintActive) {
+      this.silenceHintActive = false;
+      this.events.onSilenceHint?.(false);
+    }
     if (this.analyserRaf != null) {
       cancelAnimationFrame(this.analyserRaf);
       this.analyserRaf = null;
@@ -116,6 +135,15 @@ export class VoiceClient {
 
   private setState(s: VoiceState) {
     this.state = s;
+    // Silence hint is only meaningful while actively listening. Clear it on
+    // any transition out so it can't persist into reconnecting / closed / etc.
+    if (s !== "listening" && this.silenceHintActive) {
+      this.silenceHintActive = false;
+      this.events.onSilenceHint?.(false);
+    }
+    if (s === "listening") {
+      this.lastInputAboveFloorAt = Date.now();
+    }
     this.events.onStateChange?.(s);
   }
 
@@ -162,6 +190,11 @@ export class VoiceClient {
   }
 
   private startLevelLoop() {
+    const FLOOR = 0.04;
+    const SILENCE_MS = 6000;
+    const EMIT_MS = 60; // ~16Hz cap so React doesn't re-render every frame
+    this.lastInputAboveFloorAt = Date.now();
+    this.lastMicLevelEmitAt = 0;
     const tick = () => {
       const a = this.analyser;
       const buf = this.analyserBuf;
@@ -171,7 +204,24 @@ export class VoiceClient {
         for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
         const rms = Math.sqrt(sum / buf.length);
         const level = this.muted ? 0 : Math.min(1, rms * 4);
-        this.events.onMicLevel?.(level);
+        const now = Date.now();
+        if (now - this.lastMicLevelEmitAt >= EMIT_MS) {
+          this.lastMicLevelEmitAt = now;
+          this.events.onMicLevel?.(level);
+        }
+
+        if (!this.muted && level >= FLOOR) {
+          this.lastInputAboveFloorAt = now;
+          if (this.silenceHintActive) {
+            this.silenceHintActive = false;
+            this.events.onSilenceHint?.(false);
+          }
+        } else if (this.state === "listening" && !this.muted && now - this.lastInputAboveFloorAt > SILENCE_MS) {
+          if (!this.silenceHintActive) {
+            this.silenceHintActive = true;
+            this.events.onSilenceHint?.(true);
+          }
+        }
       }
       this.analyserRaf = requestAnimationFrame(tick);
     };
@@ -336,6 +386,13 @@ export class VoiceClient {
     }
     this.outstandingSources = [];
     this.playQueueEndsAt = now;
+    this.clearAssistantLevelTimers();
+    this.events.onAssistantLevel?.(0);
+  }
+
+  private clearAssistantLevelTimers() {
+    for (const id of this.assistantLevelTimers) clearTimeout(id);
+    this.assistantLevelTimers = [];
   }
 
   private playAudioChunk(b64: string) {
@@ -347,6 +404,13 @@ export class VoiceClient {
       const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, bin.length / 2);
       const float = new Float32Array(pcm.length);
       for (let i = 0; i < pcm.length; i++) float[i] = pcm[i] / 0x8000;
+
+      // Per-chunk RMS so the UI can drive an assistant waveform without
+      // tapping the WebAudio graph from React.
+      let sum = 0;
+      for (let i = 0; i < float.length; i++) sum += float[i] * float[i];
+      const rms = Math.sqrt(sum / Math.max(1, float.length));
+      const level = Math.min(1, rms * 3);
 
       const buf = this.playCtx.createBuffer(1, float.length, SAMPLE_RATE);
       buf.copyToChannel(float, 0);
@@ -360,7 +424,24 @@ export class VoiceClient {
       this.playQueueEndsAt = endsAt;
       const entry: AudioOut = { source: src, endsAt };
       this.outstandingSources.push(entry);
-      src.onended = () => { this.outstandingSources = this.outstandingSources.filter((e) => e !== entry); };
+
+      const emit = this.events.onAssistantLevel;
+      if (emit) {
+        const delay = Math.max(0, startAt - now) * 1000;
+        const t1 = setTimeout(() => {
+          this.assistantLevelTimers = this.assistantLevelTimers.filter((x) => x !== t1);
+          emit(level);
+        }, delay);
+        const t2 = setTimeout(() => {
+          this.assistantLevelTimers = this.assistantLevelTimers.filter((x) => x !== t2);
+          if (this.outstandingSources.length === 0) emit(0);
+        }, delay + buf.duration * 1000);
+        this.assistantLevelTimers.push(t1, t2);
+      }
+      src.onended = () => {
+        this.outstandingSources = this.outstandingSources.filter((e) => e !== entry);
+        if (this.outstandingSources.length === 0) this.events.onAssistantLevel?.(0);
+      };
     } catch { /* ignore */ }
   }
 }
