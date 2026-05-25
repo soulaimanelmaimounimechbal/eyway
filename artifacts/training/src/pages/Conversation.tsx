@@ -26,6 +26,7 @@ export default function Conversation({
 
   const [state, setState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [assistantSpeaking, setAssistantSpeaking] = useState(false);
   const [seconds, setSeconds] = useState(0);
@@ -38,7 +39,19 @@ export default function Conversation({
     const c = new VoiceClient(agent, {
       onStateChange: setState,
       onTranscript: setTranscript,
-      onError: (msg) => setError(msg),
+      onError: (msg, kind) => {
+        if (kind === "config") {
+          setError(`Setup issue — try a different persona or contact your admin. (${msg})`);
+        } else if (kind === "lost_connection") {
+          setError(`Connection lost — review what we captured. (${msg})`);
+        } else {
+          setError(msg);
+        }
+      },
+      onWarning: (msg) => {
+        setWarning(msg);
+        window.setTimeout(() => setWarning((cur) => (cur === msg ? null : cur)), 4000);
+      },
       onSpeakingChange: setAssistantSpeaking,
       onMicLevel: setMicLevel,
     });
@@ -190,6 +203,11 @@ export default function Conversation({
           </aside>
         </div>
 
+        {warning && (
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-100" data-testid="warning-banner">
+            {warning}
+          </div>
+        )}
         {error && (
           <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" data-testid="error-banner">
             {error}
@@ -248,11 +266,21 @@ function Stat({ label, value, warn }: { label: string; value: string; warn?: boo
 }
 
 function StateBadge({ state }: { state: VoiceState }) {
-  const label = { idle: "Idle", connecting: "Connecting…", ready: "Ready", listening: "Listening", closing: "Ending…", closed: "Ended", error: "Error" }[state];
+  const label = {
+    idle: "Idle",
+    connecting: "Connecting…",
+    ready: "Ready",
+    listening: "Listening",
+    reconnecting: "Reconnecting…",
+    closing: "Ending…",
+    closed: "Ended",
+    error: "Error",
+  }[state];
   return (
     <span className={cn(
       "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
       state === "listening" && "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+      state === "reconnecting" && "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
       state === "error" && "border-destructive/40 bg-destructive/10 text-destructive",
     )}>{label}</span>
   );

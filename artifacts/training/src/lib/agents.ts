@@ -8,12 +8,19 @@ export interface AgentConfig {
   bullets: string[];
   tone: string;
   voice: string;
+  fallbackVoices: string[];
   accent: string;
   keywords: string[];
   feedbackTip: string;
   instructions: string;
   greeting: string;
 }
+
+const SHARED_FALLBACK_VOICES: string[] = [
+  "en-US-Ava:DragonHDLatestNeural",
+  "en-US-Andrew:DragonHDLatestNeural",
+  "en-US-Jenny:DragonHDLatestNeural",
+];
 
 const sharedContext = `
 You are playing the role of a senior stakeholder at Glenara Travel Group, a fast-growing logistics company.
@@ -40,6 +47,7 @@ export const AGENTS: Record<SocialStyle, AgentConfig> = {
     ],
     tone: "Measured. Precise. Skeptical of hand-waving.",
     voice: "en-US-Andrew:DragonHDLatestNeural",
+    fallbackVoices: SHARED_FALLBACK_VOICES.filter((v) => v !== "en-US-Andrew:DragonHDLatestNeural"),
     accent: "from-sky-500/15 to-sky-700/5 border-sky-600/30",
     keywords: ["data", "evidence", "assumption", "assumptions", "methodology", "source"],
     feedbackTip: "Use data, structure, and clarity.",
@@ -59,6 +67,7 @@ export const AGENTS: Record<SocialStyle, AgentConfig> = {
     ],
     tone: "Direct. Impatient. Bottom-line oriented.",
     voice: "en-US-Brian:DragonHDLatestNeural",
+    fallbackVoices: SHARED_FALLBACK_VOICES.filter((v) => v !== "en-US-Brian:DragonHDLatestNeural"),
     accent: "from-rose-500/15 to-rose-700/5 border-rose-600/30",
     keywords: ["plan", "next step", "next steps", "timeline", "decision", "action", "by when"],
     feedbackTip: "Be concise and action-oriented.",
@@ -78,6 +87,7 @@ export const AGENTS: Record<SocialStyle, AgentConfig> = {
     ],
     tone: "Warm, energetic, storytelling.",
     voice: "en-US-Ava:DragonHDLatestNeural",
+    fallbackVoices: SHARED_FALLBACK_VOICES.filter((v) => v !== "en-US-Ava:DragonHDLatestNeural"),
     accent: "from-amber-500/15 to-amber-700/5 border-amber-600/30",
     keywords: ["story", "narrative", "confidence", "message", "vision", "people"],
     feedbackTip: "Focus on narrative and energy.",
@@ -97,6 +107,7 @@ export const AGENTS: Record<SocialStyle, AgentConfig> = {
     ],
     tone: "Gentle, concerned, relational.",
     voice: "en-US-Emma:DragonHDLatestNeural",
+    fallbackVoices: SHARED_FALLBACK_VOICES,
     accent: "from-emerald-500/15 to-emerald-700/5 border-emerald-600/30",
     keywords: ["team", "support", "trust", "together", "people", "we"],
     feedbackTip: "Show empathy and build trust.",

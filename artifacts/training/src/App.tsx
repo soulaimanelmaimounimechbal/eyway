@@ -6,6 +6,7 @@ import Intro from "@/pages/Intro";
 import Scenario from "@/pages/Scenario";
 import SelfReflection, { type SelfReflectionData } from "@/pages/SelfReflection";
 import SelectClient from "@/pages/SelectClient";
+import Preflight from "@/pages/Preflight";
 import Conversation from "@/pages/Conversation";
 import Outcome, { type Tier } from "@/pages/Outcome";
 import Reflection, { type ReflectionData } from "@/pages/Reflection";
@@ -20,6 +21,7 @@ type Step =
   | "scenario"
   | "self"
   | "select"
+  | "preflight"
   | "conversation"
   | "outcome"
   | "reflection"
@@ -41,7 +43,7 @@ function App() {
   // Guard: if we land on a step that requires state we don't have, navigate
   // back to the right place via effect (not during render).
   useEffect(() => {
-    if ((step === "conversation") && !style) setStep("select");
+    if ((step === "conversation" || step === "preflight") && !style) setStep("select");
     if ((step === "outcome" || step === "summary") && (!style || !result)) setStep("select");
   }, [step, style, result]);
 
@@ -65,7 +67,16 @@ function App() {
             selected={style}
             onSelect={setStyle}
             onBack={() => setStep("self")}
-            onNext={() => style && setStep("conversation")}
+            onNext={() => style && setStep("preflight")}
+          />
+        );
+      case "preflight":
+        if (!style) return null;
+        return (
+          <Preflight
+            style={style}
+            onBack={() => setStep("select")}
+            onReady={() => setStep("conversation")}
           />
         );
       case "conversation":
@@ -73,7 +84,7 @@ function App() {
         return (
           <Conversation
             style={style}
-            onBack={() => setStep("select")}
+            onBack={() => setStep("preflight")}
             onDone={(transcript: TranscriptEntry[]) => {
               const agent = AGENTS[style];
               const scored = scoreTranscript(transcript, style, agent.keywords);

@@ -114,7 +114,10 @@ interface StartMsg {
   type: "start";
   instructions: string;
   voice: string;
+  fallbackVoices: string[];
   greeting: string;
+  probe: boolean;
+  resume: boolean;
 }
 
 function parseStartMessage(raw: unknown): StartMsg | null {
@@ -125,17 +128,49 @@ function parseStartMessage(raw: unknown): StartMsg | null {
   try {
     const j = JSON.parse(text) as Record<string, unknown>;
     if (j["type"] !== "start") return null;
+    const probe = j["probe"] === true;
+    const resume = j["resume"] === true;
     const instructions = typeof j["instructions"] === "string" ? (j["instructions"] as string) : "";
     const voice = typeof j["voice"] === "string" ? (j["voice"] as string) : DEFAULT_VOICE;
     const greeting = typeof j["greeting"] === "string" ? (j["greeting"] as string) : "";
-    if (!instructions || !greeting) return null;
+    const fbRaw = Array.isArray(j["fallbackVoices"]) ? (j["fallbackVoices"] as unknown[]) : [];
+    const fallbackVoices = fbRaw
+      .filter((v): v is string => typeof v === "string" && v.length > 0)
+      .slice(0, 6)
+      .map((v) => v.slice(0, 200));
+    if (!probe && (!instructions || !greeting)) return null;
     return {
       type: "start",
       instructions: instructions.slice(0, MAX_INSTR_LEN),
       voice: voice.slice(0, 200),
+      fallbackVoices,
       greeting: greeting.slice(0, MAX_GREETING_LEN),
+      probe,
+      resume,
     };
   } catch { return null; }
+}
+
+type UpstreamErrorKind = "benign" | "transient" | "config" | "fatal";
+
+function classifyUpstreamError(code: string, msg: string): UpstreamErrorKind {
+  const c = code.toLowerCase();
+  const m = msg.toLowerCase();
+  if (c === "response_cancel_not_active" || /no active response/.test(m)) return "benign";
+  if (
+    /invalid_voice|voice_not_found|model_not_found|deployment_not_found/.test(c) ||
+    /invalid.*(voice|model)|(voice|model).*(not\s*found|not\s*available|invalid)/.test(m)
+  ) return "config";
+  if (
+    /rate.?limit|timeout|server_error|temporarily|unavailable|5\d\d/.test(c) ||
+    /rate.?limit|timeout|temporarily|try again|unavailable/.test(m)
+  ) return "transient";
+  return "fatal";
+}
+
+function isInvalidVoiceError(err: unknown): boolean {
+  const m = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return /invalid.*voice|voice.*(invalid|not\s*found|not\s*available|unsupported)/.test(m);
 }
 
 export function registerVoiceLiveTokenRoute(app: Express): void {
@@ -238,8 +273,11 @@ async function handleClient(client: WsWebSocket): Promise<void> {
     try { await session.dispose(); } catch { /* noop */ }
   };
 
+  let readySent = false;
   subscription = session.subscribe({
     onSessionUpdated: async () => {
+      if (readySent) return;
+      readySent = true;
       sendJson(client, { type: "ready" });
     },
     onResponseAudioDelta: async (event) => {
@@ -280,61 +318,117 @@ async function handleClient(client: WsWebSocket): Promise<void> {
     onServerError: async (event) => {
       const code = event.error?.code ?? "";
       const msg = event.error?.message ?? "voice service error";
-      const benign =
-        code === "response_cancel_not_active" ||
-        /no active response/i.test(msg);
-      if (benign) {
-        logger.debug({ code, msg }, "voice-live: benign upstream error suppressed");
-        return;
+      const kind = classifyUpstreamError(code, msg);
+      const safeMsg = msg.slice(0, 300);
+      switch (kind) {
+        case "benign":
+          logger.debug({ code, msg }, "voice-live: benign upstream error suppressed");
+          return;
+        case "transient":
+          logger.warn({ code, msg }, "voice-live: transient upstream error");
+          sendJson(client, { type: "warning", kind: "transient", message: safeMsg });
+          return;
+        case "config":
+          logger.warn({ code, msg }, "voice-live: config upstream error");
+          sendJson(client, { type: "error", kind: "config", message: safeMsg });
+          return;
+        default:
+          logger.warn({ code, msg }, "voice-live: upstream error");
+          sendJson(client, { type: "error", kind: "fatal", message: safeMsg });
       }
-      logger.warn({ code, msg }, "voice-live: upstream error");
-      sendJson(client, { type: "error", message: msg.slice(0, 300) });
     },
     onDisconnected: async (args) => {
       const reason = (args as { reason?: string } | undefined)?.reason;
       const msg = reason && reason.length > 0 ? `upstream disconnected: ${reason}` : "upstream disconnected";
       logger.warn({ reason }, "voice-live: upstream disconnected");
-      sendJson(client, { type: "error", message: msg.slice(0, 300) });
+      // Tagged as lost_connection so the client can decide between reconnect
+      // and remediation copy without inferring from a generic error string.
+      sendJson(client, { type: "error", kind: "lost_connection", message: msg.slice(0, 300) });
       await cleanup();
       safeClose(client, 1011, "upstream disconnected");
     },
   });
 
+  const probeInstructions = "You are a connection probe. Do not speak.";
+  const voiceLadder = [start.voice, ...start.fallbackVoices.filter((v) => v !== start.voice)];
+  let chosenVoice = "";
   try {
     await session.connect();
-    await session.updateSession({
-      model,
-      modalities: ["text", "audio"],
-      instructions: start.instructions,
-      voice: { type: "azure-standard", name: start.voice },
-      inputAudioFormat: "pcm16",
-      outputAudioFormat: "pcm16",
-      turnDetection: {
-        type: "server_vad",
-        threshold: 0.5,
-        prefixPaddingInMs: 300,
-        silenceDurationInMs: 500,
-      },
-      inputAudioEchoCancellation: { type: "server_echo_cancellation" },
-      inputAudioNoiseReduction: { type: "azure_deep_noise_suppression" },
-      inputAudioTranscription: { model: "azure-speech" },
-    });
+
+    let lastErr: unknown = null;
+    for (const candidate of voiceLadder) {
+      try {
+        await session.updateSession({
+          model,
+          modalities: ["text", "audio"],
+          instructions: start.probe ? probeInstructions : start.instructions,
+          voice: { type: "azure-standard", name: candidate },
+          inputAudioFormat: "pcm16",
+          outputAudioFormat: "pcm16",
+          turnDetection: {
+            type: "server_vad",
+            threshold: 0.5,
+            prefixPaddingInMs: 300,
+            silenceDurationInMs: 500,
+          },
+          inputAudioEchoCancellation: { type: "server_echo_cancellation" },
+          inputAudioNoiseReduction: { type: "azure_deep_noise_suppression" },
+          inputAudioTranscription: { model: "azure-speech" },
+        });
+        chosenVoice = candidate;
+        if (candidate !== start.voice) {
+          logger.warn({ requested: start.voice, used: candidate }, "voice-live: voice fallback used");
+          sendJson(client, { type: "warning", kind: "voice_fallback", message: `voice fell back to ${candidate}` });
+        } else {
+          logger.info({ voice: candidate, probe: start.probe }, "voice-live: session ready");
+        }
+        break;
+      } catch (err) {
+        lastErr = err;
+        if (!isInvalidVoiceError(err)) throw err;
+        logger.warn({ voice: candidate, err: (err as Error).message }, "voice-live: voice invalid, trying next");
+      }
+    }
+
+    if (!chosenVoice) {
+      throw lastErr instanceof Error ? lastErr : new Error("no usable voice");
+    }
+
+    if (start.probe) {
+      // Probe mode: confirm session is ready, then close cleanly without speaking.
+      if (!readySent) {
+        readySent = true;
+        sendJson(client, { type: "ready" });
+      }
+      sendJson(client, { type: "probe_ok", voice: chosenVoice });
+      await cleanup();
+      safeClose(client, 1000, "probe complete");
+      return;
+    }
 
     // Pre-generated greeting as assistant turn (deterministic; speaks the persona's opening line).
-    await session.sendEvent({
-      type: "response.create",
-      response: {
-        preGeneratedAssistantMessage: {
-          type: "message",
-          role: "assistant",
-          content: [{ type: "text", text: start.greeting }],
+    // Skipped on resume so a reconnect doesn't replay the opener.
+    if (!start.resume) {
+      await session.sendEvent({
+        type: "response.create",
+        response: {
+          preGeneratedAssistantMessage: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text: start.greeting }],
+          },
         },
-      },
-    });
+      });
+    }
   } catch (err) {
     const detail = (err as Error).message || "session init failed";
-    logger.error({ err: detail }, "voice-live: session init failed");
-    sendJson(client, { type: "error", message: `session init failed: ${detail}`.slice(0, 300) });
+    const kind = isInvalidVoiceError(err) ? "config" : classifyUpstreamError("", detail);
+    logger.error({ err: detail, kind }, "voice-live: session init failed");
+    sendJson(client, {
+      type: "error",
+      kind: kind === "transient" ? "transient" : kind === "config" ? "config" : "fatal",
+      message: `session init failed: ${detail}`.slice(0, 300),
+    });
     await cleanup();
     safeClose(client, 1011, "session init failed");
     return;
