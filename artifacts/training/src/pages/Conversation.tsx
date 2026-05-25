@@ -134,14 +134,12 @@ export default function Conversation({
   }
 
   function handleBack() {
-    // Back is no longer a silent escape — it routes through the same end flow
-    // so we never lose the captured transcript. Same gating as the End CTA:
-    // skip confirm only when terminal or once the user has had ≥2 turns.
-    if (isTerminal) {
-      void endCall("back").then(() => onBack());
-      return;
-    }
-    if (userTurns >= 2) {
+    // Back is no longer a silent escape — it always routes through endCall so
+    // we never lose the captured transcript. endCall ends the session and
+    // navigates to Outcome via onDone, so we must NOT also call onBack() (that
+    // would race the navigation and yank the user off the Outcome screen).
+    // Same confirm gating as the End CTA: skip only when terminal or ≥2 turns.
+    if (isTerminal || userTurns >= 2) {
       void endCall("back");
       return;
     }
