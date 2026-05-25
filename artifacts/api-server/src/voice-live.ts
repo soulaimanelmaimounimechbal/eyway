@@ -48,18 +48,29 @@ function cleanupNonces() {
   for (const [n, exp] of usedNonces) if (exp < now) usedNonces.delete(n);
 }
 
+const HEX_RE = /^[0-9a-f]+$/i;
+
 function verifyToken(token: string | null): boolean {
   if (!token) return false;
   const parts = token.split(".");
   if (parts.length !== 3) return false;
   const [nonce, expStr, sig] = parts;
+  if (!HEX_RE.test(nonce) || !HEX_RE.test(sig)) return false;
   const exp = Number(expStr);
   if (!Number.isFinite(exp) || exp < Date.now()) return false;
   let secret: string;
   try { secret = getSecret(); } catch { return false; }
   const expected = signToken(nonce, exp, secret);
   if (expected.length !== sig.length) return false;
-  if (!timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(sig, "hex"))) return false;
+  let expectedBuf: Buffer;
+  let sigBuf: Buffer;
+  try {
+    expectedBuf = Buffer.from(expected, "hex");
+    sigBuf = Buffer.from(sig, "hex");
+  } catch { return false; }
+  if (expectedBuf.length !== sigBuf.length || expectedBuf.length === 0) return false;
+  try { if (!timingSafeEqual(expectedBuf, sigBuf)) return false; }
+  catch { return false; }
   cleanupNonces();
   if (usedNonces.has(nonce)) return false;
   usedNonces.set(nonce, exp);
@@ -275,6 +286,8 @@ async function handleClient(client: WsWebSocket): Promise<void> {
       type: "response.create",
       response: {
         preGeneratedAssistantMessage: {
+          type: "message",
+          role: "assistant",
           content: [{ type: "text", text: start.greeting }],
         },
       },
