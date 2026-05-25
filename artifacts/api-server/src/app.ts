@@ -3,7 +3,12 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { registerVoiceLiveTokenRoute } from "./voice-live";
+import {
+  registerVoiceLiveHealthRoute,
+  registerVoiceLiveSmokeRoute,
+  registerVoiceLiveTelemetryRoute,
+  registerVoiceLiveTokenRoute,
+} from "./voice-live";
 
 const app: Express = express();
 
@@ -31,6 +36,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 registerVoiceLiveTokenRoute(app);
+registerVoiceLiveTelemetryRoute(app);
+registerVoiceLiveHealthRoute(app);
+registerVoiceLiveSmokeRoute(app);
 app.use("/api", router);
 
 export default app;

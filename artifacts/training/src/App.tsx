@@ -11,6 +11,7 @@ import Conversation from "@/pages/Conversation";
 import Outcome, { type Tier } from "@/pages/Outcome";
 import Reflection, { type ReflectionData } from "@/pages/Reflection";
 import Summary from "@/pages/Summary";
+import Debug from "@/pages/Debug";
 import { AGENTS, type SocialStyle } from "@/lib/agents";
 import { scoreTranscript, type TranscriptEntry } from "@/lib/voice-client";
 
@@ -35,6 +36,10 @@ interface SessionResult {
 }
 
 function App() {
+  // Hidden debug page: only mounts when ?debug=1 is present so it never
+  // accidentally ships in the user flow.
+  const isDebug = typeof window !== "undefined"
+    && new URLSearchParams(window.location.search).get("debug") === "1";
   const [step, setStep] = useState<Step>("intro");
   const [selfData, setSelfData] = useState<SelfReflectionData>({ selfStyle: "", note: "" });
   const [reflectData, setReflectData] = useState<ReflectionData>({ worked: "", next: "", hardestStyle: "" });
@@ -136,7 +141,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <div className="min-h-screen bg-background text-foreground">{content}</div>
+        <div className="min-h-screen bg-background text-foreground">{isDebug ? <Debug /> : content}</div>
         <Toaster />
       </TooltipProvider>
     </QueryClientProvider>

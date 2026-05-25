@@ -12,6 +12,7 @@ import {
   type CoachingNudge,
   type TurnEvaluation,
 } from "@/lib/coaching";
+import { emit } from "@/lib/telemetry";
 
 const MAX_TURNS = 10;
 const MAX_SECONDS = 300;
@@ -53,12 +54,21 @@ export default function Conversation({
   const nudgeDismissTimerRef = useRef<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
   const endedRef = useRef(false);
+  const firstAudioEmittedRef = useRef(false);
+  const wasReconnectingRef = useRef(false);
 
   useEffect(() => {
     const c = new VoiceClient(agent, {
       onStateChange: (s) => {
         setState(s);
         if (s === "listening" || s === "reconnecting") setError(null);
+        if (s === "reconnecting" && !wasReconnectingRef.current) {
+          wasReconnectingRef.current = true;
+          emit("reconnect_attempted", { persona: style });
+        } else if (wasReconnectingRef.current && (s === "listening" || s === "ready")) {
+          wasReconnectingRef.current = false;
+          emit("reconnect_succeeded", { persona: style });
+        }
       },
       onTranscript: setTranscript,
       onError: (msg, kind) => {
@@ -69,18 +79,32 @@ export default function Conversation({
         } else {
           setError(msg);
         }
+        emit("error", { kind: kind ?? "fatal", message: msg, persona: style });
       },
-      onWarning: (msg) => {
+      onWarning: (msg, kind) => {
         setWarning(msg);
         window.setTimeout(() => setWarning((cur) => (cur === msg ? null : cur)), 4000);
+        if (kind === "voice_fallback") {
+          // Message looks like "voice fell back to <name>"; extract the target
+          // voice for telemetry without parsing.
+          const to = msg.split("voice fell back to ").pop()?.trim() ?? "";
+          emit("voice_fallback", { from: agent.voice, to, persona: style });
+        }
       },
       onSpeakingChange: setAssistantSpeaking,
       onMicLevel: setMicLevel,
-      onAssistantLevel: setAssistantLevel,
+      onAssistantLevel: (level) => {
+        setAssistantLevel(level);
+        if (!firstAudioEmittedRef.current && level > 0 && startedAtRef.current) {
+          firstAudioEmittedRef.current = true;
+          emit("first_audio_ms", { ms: Date.now() - startedAtRef.current, persona: style });
+        }
+      },
       onSilenceHint: setSilenceHint,
     });
     clientRef.current = c;
     startedAtRef.current = Date.now();
+    emit("call_started", { persona: style, voice: agent.voice });
     c.start().catch(() => {});
     const interval = setInterval(() => {
       if (startedAtRef.current) setSeconds(Math.floor((Date.now() - startedAtRef.current) / 1000));
@@ -149,13 +173,17 @@ export default function Conversation({
   const shouldAutoEnd = (timeUp || turnsUp) && !assistantSpeaking;
   const isTerminal = state === "closed" || state === "error";
 
-  const endCall = useCallback(async (_reason: EndReason) => {
+  const endCall = useCallback(async (reason: EndReason) => {
     if (endedRef.current) return;
     endedRef.current = true;
+    const finalTranscript = clientRef.current?.getTranscript() ?? transcript;
+    const turns = finalTranscript.filter((t) => t.role === "user" && t.done && t.text.trim()).length;
+    const durationMs = startedAtRef.current ? Date.now() - startedAtRef.current : 0;
+    emit("call_ended", { reason, turns, durationMs, persona: style });
     const c = clientRef.current;
     if (c) await c.stop();
-    onDoneRef.current(clientRef.current?.getTranscript() ?? transcript);
-  }, [transcript]);
+    onDoneRef.current(finalTranscript);
+  }, [transcript, style]);
 
   // Surface the 30-second warning toast once.
   useEffect(() => {

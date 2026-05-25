@@ -5,6 +5,7 @@ import { AGENTS, type SocialStyle } from "@/lib/agents";
 import { runMicCheck, runVoiceProbe } from "@/lib/voice-client";
 import { CheckCircle2, XCircle, Loader2, Mic, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { emit, newTelemetrySession } from "@/lib/telemetry";
 
 type StepStatus = "idle" | "running" | "pass" | "fail";
 
@@ -44,6 +45,10 @@ export default function Preflight({
   const runAll = useCallback(async () => {
     const myRun = ++runRef.current;
     setRunning(true);
+    // Reset the telemetry session for this preflight attempt so all events
+    // (preflight_*, call_*, errors) share a single per-attempt sessionId.
+    newTelemetrySession();
+    emit("preflight_started", { persona: style });
     setMic({ status: "running", detail: "Requesting microphone access…" });
     setSelfTest(INITIAL);
     setToken(INITIAL);
@@ -53,6 +58,7 @@ export default function Preflight({
     if (myRun !== runRef.current) return;
     if (!micResult.ok && micResult.permission !== "granted") {
       setMic({ status: "fail", detail: micResult.message });
+      emit("preflight_failed", { step: "mic", reason: micResult.message ?? "permission_denied", persona: style });
       setRunning(false);
       return;
     }
@@ -71,6 +77,7 @@ export default function Preflight({
         detail: self.message ?? "We didn't pick up your voice.",
         meta: `Peak level ${(self.peakLevel * 100).toFixed(0)}%`,
       });
+      emit("preflight_failed", { step: "self_test", reason: self.message ?? "no_voice", persona: style });
       setRunning(false);
       return;
     }
@@ -86,19 +93,23 @@ export default function Preflight({
       if (myRun !== runRef.current) return;
       if (!r.ok) {
         setToken({ status: "fail", detail: `Token request failed (HTTP ${r.status}).` });
+        emit("preflight_failed", { step: "token", reason: `http_${r.status}`, persona: style });
         setRunning(false);
         return;
       }
       const j = (await r.json()) as { token?: string };
       if (!j.token) {
         setToken({ status: "fail", detail: "Token response was missing the token." });
+        emit("preflight_failed", { step: "token", reason: "missing_token", persona: style });
         setRunning(false);
         return;
       }
       setToken({ status: "pass", detail: "Session token minted." });
     } catch (err) {
       if (myRun !== runRef.current) return;
-      setToken({ status: "fail", detail: (err as Error).message || "Could not reach the server." });
+      const msg = (err as Error).message || "Could not reach the server.";
+      setToken({ status: "fail", detail: msg });
+      emit("preflight_failed", { step: "token", reason: msg, persona: style });
       setRunning(false);
       return;
     }
@@ -114,6 +125,7 @@ export default function Preflight({
             ? "The voice service is temporarily unavailable. Retry in a moment."
             : "Could not reach the voice service.";
       setProbe({ status: "fail", detail: `${hint} (${p.message ?? "no details"})` });
+      emit("preflight_failed", { step: "probe", reason: p.kind ?? "fail", message: p.message, persona: style });
       setRunning(false);
       return;
     }
@@ -122,8 +134,9 @@ export default function Preflight({
       detail: "Voice service reachable.",
       meta: p.voice && p.voice !== agent.voice ? `Using fallback: ${p.voice.split(":")[0]}` : undefined,
     });
+    emit("preflight_passed", { persona: style, voice: p.voice ?? agent.voice });
     setRunning(false);
-  }, [agent]);
+  }, [agent, style]);
 
   // Auto-run once on mount.
   useEffect(() => {
