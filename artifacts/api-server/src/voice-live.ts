@@ -226,6 +226,13 @@ function classifyUpstreamError(code: string, msg: string): UpstreamErrorKind {
   const c = code.toLowerCase();
   const m = msg.toLowerCase();
   if (c === "response_cancel_not_active" || /no active response/.test(m)) return "benign";
+  // Race: the previous response is still closing on Azure's side when the
+  // user releases PTT. The pre-emptive response.cancel below resolves it
+  // 99% of the time; treat any leak-through as benign so the call survives.
+  if (c === "conversation_already_has_active_response" || /already has an active response/.test(m)) return "benign";
+  // Belt-and-braces: our client gate filters tiny buffers, but if anything
+  // slips through (mid-flight reconnect, etc.), don't tear the call down.
+  if (c === "input_audio_buffer_commit_empty" || /buffer too small|commit_empty/.test(m)) return "benign";
   if (
     /invalid_voice|voice_not_found|model_not_found|deployment_not_found/.test(c) ||
     /invalid.*(voice|model)|(voice|model).*(not\s*found|not\s*available|invalid)/.test(m)
@@ -727,6 +734,13 @@ async function handleClient(client: WsWebSocket): Promise<void> {
           responseInFlight = true;
           void (async () => {
             try {
+              // Pre-emptive cancel: Azure's response lifecycle can lag
+              // behind our local `onResponseDone` (particularly for the
+              // pre-generated greeting), so a brand-new response.create
+              // would race "conversation_already_has_active_response"
+              // and tear the call down. response.cancel is a no-op when
+              // nothing is active (classified benign upstream).
+              try { await session.sendEvent({ type: "response.cancel" }); } catch { /* noop */ }
               await session.sendEvent({ type: "input_audio_buffer.commit" });
               await session.sendEvent({ type: "response.create" });
             } catch (err) {
