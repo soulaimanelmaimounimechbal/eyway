@@ -34,6 +34,16 @@ export type WarningKind = "transient" | "voice_fallback";
 
 const RECONNECT_WINDOW_MS = 5_000;
 
+// Minimum cumulative time the user must spend above the speech floor
+// during a single push-to-talk turn before we'll commit the buffer.
+// Tuned to filter taps, single coughs, and breath noise without rejecting
+// genuine short utterances ("yes", "okay").
+const MIN_SPEECH_MS = 400;
+// Minimum peak normalized RMS level seen during the turn. The level loop
+// already normalizes by `rms * 4`, so 0.08 corresponds to a clearly
+// audible word, not just room noise breaking the 0.04 noise floor.
+const MIN_SPEECH_PEAK = 0.08;
+
 interface AudioOut {
   source: AudioBufferSourceNode;
   endsAt: number;
@@ -59,6 +69,12 @@ export class VoiceClient {
   private muted = true;
   private micActive = false;
   private audioSentSinceEngage = false;
+  // Speech-quality gate. We don't want a stray cough or half-pressed PTT to
+  // commit a turn and provoke a reply, so we require the user to actually
+  // speak above a noise floor for a minimum duration before we'll commit.
+  private speechMsSinceEngage = 0;
+  private peakLevelSinceEngage = 0;
+  private lastSpeechTickAt = 0;
   private lastErrorMessage = "";
   private readyAt = 0;
   private reconnectAttempted = false;
@@ -94,6 +110,9 @@ export class VoiceClient {
     this.micActive = true;
     this.muted = false;
     this.audioSentSinceEngage = false;
+    this.speechMsSinceEngage = 0;
+    this.peakLevelSinceEngage = 0;
+    this.lastSpeechTickAt = 0;
     this.lastInputAboveFloorAt = Date.now();
     this.applyMuteToTracks();
   }
@@ -112,11 +131,27 @@ export class VoiceClient {
       this.silenceHintActive = false;
       this.events.onSilenceHint?.(false);
     }
+    // Speech-quality gate: only commit if the user actually spoke. Without
+    // this, a quick PTT tap, a stray cough, or background noise would send a
+    // sub-second buffer upstream and the persona would invent a reply to it.
+    const spokeEnough =
+      this.audioSentSinceEngage &&
+      this.speechMsSinceEngage >= MIN_SPEECH_MS &&
+      this.peakLevelSinceEngage >= MIN_SPEECH_PEAK;
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const payload = JSON.stringify({ type: this.audioSentSinceEngage ? "commit" : "clear" });
+      const payload = JSON.stringify({ type: spokeEnough ? "commit" : "clear" });
       try { this.ws.send(payload); } catch { /* swallow */ }
     }
+    if (!spokeEnough && this.audioSentSinceEngage) {
+      this.events.onWarning?.(
+        "We didn't catch that — hold the button and speak clearly.",
+        "transient",
+      );
+    }
     this.audioSentSinceEngage = false;
+    this.speechMsSinceEngage = 0;
+    this.peakLevelSinceEngage = 0;
+    this.lastSpeechTickAt = 0;
   }
 
   isMicActive(): boolean { return this.micActive; }
@@ -244,6 +279,17 @@ export class VoiceClient {
         }
 
         if (!this.muted && level >= FLOOR) {
+          // Accumulate "real speech" time while the mic is engaged so the
+          // releaseMic() gate can reject sub-threshold turns. We sum the
+          // gap from the previous above-floor tick (capped at 100ms so a
+          // long quiet gap doesn't get credited as speech).
+          if (this.micActive) {
+            if (this.lastSpeechTickAt > 0) {
+              this.speechMsSinceEngage += Math.min(100, now - this.lastSpeechTickAt);
+            }
+            this.lastSpeechTickAt = now;
+            if (level > this.peakLevelSinceEngage) this.peakLevelSinceEngage = level;
+          }
           this.lastInputAboveFloorAt = now;
           if (this.silenceHintActive) {
             this.silenceHintActive = false;
