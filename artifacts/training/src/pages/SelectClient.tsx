@@ -1,19 +1,24 @@
 import { Button } from "@/components/ui/button";
 import { ProgressDots } from "@/components/ProgressDots";
-import { AGENT_LIST, type SocialStyle } from "@/lib/agents";
+import { AGENT_LIST, INTENSITY_OPTIONS, type Intensity, type SocialStyle } from "@/lib/agents";
 import { cn } from "@/lib/utils";
 
 export default function SelectClient({
   selected,
   onSelect,
+  intensity,
+  onIntensityChange,
   onNext,
   onBack,
 }: {
   selected: SocialStyle | null;
   onSelect: (s: SocialStyle) => void;
+  intensity: Intensity;
+  onIntensityChange: (i: Intensity) => void;
   onNext: () => void;
   onBack: () => void;
 }) {
+  const intensityDesc = INTENSITY_OPTIONS.find((o) => o.id === intensity)?.description ?? "";
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col p-6 sm:p-10">
       <header className="flex items-center justify-between">
@@ -67,6 +72,45 @@ export default function SelectClient({
           })}
         </div>
       </main>
+
+      <section className="mt-8 rounded-2xl border bg-card p-4 shadow-sm" data-testid="intensity-selector">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold">Persona intensity</div>
+            <div className="text-xs text-muted-foreground">
+              Tune how strongly the stakeholder reacts. Start with Standard.
+            </div>
+          </div>
+          <div
+            className="inline-flex overflow-hidden rounded-full border text-xs font-semibold"
+            role="radiogroup"
+            aria-label="Persona intensity"
+          >
+            {INTENSITY_OPTIONS.map((opt) => {
+              const active = intensity === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => onIntensityChange(opt.id)}
+                  className={cn(
+                    "px-3 py-1.5 hover-elevate",
+                    active ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground",
+                  )}
+                  data-testid={`button-intensity-${opt.id}`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="mt-2 text-xs text-muted-foreground" data-testid="intensity-description">
+          {intensityDesc}
+        </div>
+      </section>
 
       <footer className="flex items-center justify-between pt-6">
         <span className="text-xs text-muted-foreground">You can come back and try another after.</span>

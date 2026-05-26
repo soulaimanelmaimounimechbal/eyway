@@ -161,9 +161,23 @@ function sendJson(ws: WsWebSocket, obj: unknown): void {
   catch (err) { logger.warn({ err: (err as Error).message }, "client send failed"); }
 }
 
+type Intensity = "subtle" | "standard" | "extreme";
+
+// Server-side mirror of artifacts/training/src/lib/agents.ts INTENSITY_MODIFIERS.
+// Kept here (rather than imported across packages) so the API server owns the
+// final prompt seen by Azure and the client cannot inject arbitrary suffix text.
+const INTENSITY_MODIFIERS: Record<Intensity, string> = {
+  subtle:
+    "\n\nIntensity: SUBTLE. Keep reactions restrained and professional. Do not interrupt. Stay patient even when answers are vague. Express frustration or concern briefly and only when clearly warranted. Stay in character, but dial the emotion down.",
+  standard: "",
+  extreme:
+    "\n\nIntensity: EXTREME. Amplify your in-character reactions. Be visibly impatient, emotional, or insistent depending on your style. React strongly and immediately when answers are off-style, vague, or evasive. Stay in character, but make the trait unmistakable.",
+};
+
 interface StartMsg {
   type: "start";
   instructions: string;
+  intensity: Intensity;
   voice: string;
   fallbackVoices: string[];
   greeting: string;
@@ -184,6 +198,9 @@ function parseStartMessage(raw: unknown): StartMsg | null {
     const instructions = typeof j["instructions"] === "string" ? (j["instructions"] as string) : "";
     const voice = typeof j["voice"] === "string" ? (j["voice"] as string) : DEFAULT_VOICE;
     const greeting = typeof j["greeting"] === "string" ? (j["greeting"] as string) : "";
+    const intensityRaw = j["intensity"];
+    const intensity: Intensity =
+      intensityRaw === "subtle" || intensityRaw === "extreme" ? intensityRaw : "standard";
     const fbRaw = Array.isArray(j["fallbackVoices"]) ? (j["fallbackVoices"] as unknown[]) : [];
     const fallbackVoices = fbRaw
       .filter((v): v is string => typeof v === "string" && v.length > 0)
@@ -193,6 +210,7 @@ function parseStartMessage(raw: unknown): StartMsg | null {
     return {
       type: "start",
       instructions: instructions.slice(0, MAX_INSTR_LEN),
+      intensity,
       voice: voice.slice(0, 200),
       fallbackVoices,
       greeting: greeting.slice(0, MAX_GREETING_LEN),
@@ -592,6 +610,9 @@ async function handleClient(client: WsWebSocket): Promise<void> {
   });
 
   const probeInstructions = "You are a connection probe. Do not speak.";
+  // Append the intensity modifier so the same four personas can be dialled
+  // up or down without separate prompt files. Standard is an empty suffix.
+  const personaInstructions = `${start.instructions}${INTENSITY_MODIFIERS[start.intensity]}`;
   const voiceLadder = [start.voice, ...start.fallbackVoices.filter((v) => v !== start.voice)];
   let chosenVoice = "";
   try {
@@ -603,7 +624,7 @@ async function handleClient(client: WsWebSocket): Promise<void> {
         await session.updateSession({
           model,
           modalities: ["text", "audio"],
-          instructions: start.probe ? probeInstructions : start.instructions,
+          instructions: start.probe ? probeInstructions : personaInstructions,
           voice: { type: "azure-standard", name: candidate },
           inputAudioFormat: "pcm16",
           outputAudioFormat: "pcm16",

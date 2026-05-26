@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ProgressDots } from "@/components/ProgressDots";
-import { AGENTS, type SocialStyle } from "@/lib/agents";
+import { AGENTS, DEFAULT_INTENSITY, type Intensity, type SocialStyle } from "@/lib/agents";
 import { VoiceClient, type TranscriptEntry, type VoiceState } from "@/lib/voice-client";
 import { Mic, MicOff, PhoneOff, Loader2, MessageSquareWarning, Lightbulb, X, Hand, MousePointerClick } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -32,10 +32,12 @@ type EndReason = "manual" | "back" | "time_up" | "turns_up" | "terminal";
 
 export default function Conversation({
   style,
+  intensity = DEFAULT_INTENSITY,
   onDone,
   onBack,
 }: {
   style: SocialStyle;
+  intensity?: Intensity;
   onDone: (transcript: TranscriptEntry[]) => void;
   onBack: () => void;
 }) {
@@ -71,7 +73,7 @@ export default function Conversation({
   const wasReconnectingRef = useRef(false);
 
   useEffect(() => {
-    const c = new VoiceClient(agent, {
+    const c = new VoiceClient(agent, intensity, {
       onStateChange: (s) => {
         setState(s);
         if (s === "listening" || s === "reconnecting") setError(null);
@@ -117,7 +119,7 @@ export default function Conversation({
     });
     clientRef.current = c;
     startedAtRef.current = Date.now();
-    emit("call_started", { persona: style, voice: agent.voice });
+    emit("call_started", { persona: style, voice: agent.voice, intensity });
     c.start().catch(() => {});
     const interval = setInterval(() => {
       if (startedAtRef.current) setSeconds(Math.floor((Date.now() - startedAtRef.current) / 1000));

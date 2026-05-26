@@ -1,5 +1,27 @@
 export type SocialStyle = "analytical" | "driving" | "expressive" | "amiable";
 
+export type Intensity = "subtle" | "standard" | "extreme";
+
+export const DEFAULT_INTENSITY: Intensity = "standard";
+
+// Prompt suffix appended to a persona's `instructions` so the same four
+// characters can be dialled up or down without rewriting their prompts.
+// Standard is empty (current behavior). Kept short and rules-based so the
+// model treats them as overrides, not flavour text.
+export const INTENSITY_MODIFIERS: Record<Intensity, string> = {
+  subtle:
+    "\n\nIntensity: SUBTLE. Keep reactions restrained and professional. Do not interrupt. Stay patient even when answers are vague. Express frustration or concern briefly and only when clearly warranted. Stay in character, but dial the emotion down.",
+  standard: "",
+  extreme:
+    "\n\nIntensity: EXTREME. Amplify your in-character reactions. Be visibly impatient, emotional, or insistent depending on your style. React strongly and immediately when answers are off-style, vague, or evasive. Stay in character, but make the trait unmistakable.",
+};
+
+export const INTENSITY_OPTIONS: { id: Intensity; label: string; description: string }[] = [
+  { id: "subtle", label: "Subtle", description: "Dialled-down reactions, more patience" },
+  { id: "standard", label: "Standard", description: "Default — the persona as written" },
+  { id: "extreme", label: "Extreme", description: "Amplified reactions, harder to please" },
+];
+
 export interface AgentConfig {
   id: SocialStyle;
   name: string;

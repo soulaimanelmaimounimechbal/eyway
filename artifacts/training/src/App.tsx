@@ -12,7 +12,7 @@ import Outcome, { type Tier } from "@/pages/Outcome";
 import Reflection, { type ReflectionData } from "@/pages/Reflection";
 import Summary from "@/pages/Summary";
 import Debug from "@/pages/Debug";
-import { AGENTS, type SocialStyle } from "@/lib/agents";
+import { AGENTS, DEFAULT_INTENSITY, type Intensity, type SocialStyle } from "@/lib/agents";
 import { scoreTranscript, type TranscriptEntry } from "@/lib/voice-client";
 
 const queryClient = new QueryClient();
@@ -44,6 +44,7 @@ function App() {
   const [selfData, setSelfData] = useState<SelfReflectionData>({ selfStyle: "", note: "" });
   const [reflectData, setReflectData] = useState<ReflectionData>({ worked: "", next: "", hardestStyle: "" });
   const [style, setStyle] = useState<SocialStyle | null>(null);
+  const [intensity, setIntensity] = useState<Intensity>(DEFAULT_INTENSITY);
   const [result, setResult] = useState<SessionResult | null>(null);
 
   // Guard: if we land on a step that requires state we don't have, navigate
@@ -72,6 +73,8 @@ function App() {
           <SelectClient
             selected={style}
             onSelect={setStyle}
+            intensity={intensity}
+            onIntensityChange={setIntensity}
             onBack={() => setStep("self")}
             onNext={() => style && setStep("preflight")}
           />
@@ -90,6 +93,7 @@ function App() {
         return (
           <Conversation
             style={style}
+            intensity={intensity}
             onBack={() => setStep("preflight")}
             onDone={(transcript: TranscriptEntry[]) => {
               const agent = AGENTS[style];
@@ -136,7 +140,7 @@ function App() {
           />
         );
     }
-  }, [step, selfData, reflectData, style, result]);
+  }, [step, selfData, reflectData, style, intensity, result]);
 
   return (
     <QueryClientProvider client={queryClient}>

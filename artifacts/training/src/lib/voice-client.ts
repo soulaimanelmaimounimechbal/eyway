@@ -1,4 +1,4 @@
-import type { AgentConfig, SocialStyle } from "./agents";
+import { DEFAULT_INTENSITY, type AgentConfig, type Intensity, type SocialStyle } from "./agents";
 
 const SAMPLE_RATE = 24000;
 
@@ -71,6 +71,7 @@ export class VoiceClient {
 
   constructor(
     private readonly agent: AgentConfig,
+    private readonly intensity: Intensity,
     private readonly events: VoiceClientEvents,
   ) {}
 
@@ -292,6 +293,7 @@ export class VoiceClient {
       type: "start",
       resume: isReconnect,
       instructions: this.agent.instructions,
+      intensity: this.intensity,
       voice: this.agent.voice,
       fallbackVoices: this.agent.fallbackVoices,
       greeting: this.agent.greeting,
