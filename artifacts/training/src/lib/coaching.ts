@@ -197,7 +197,10 @@ export function pickNudge(
   return candidate;
 }
 
-const SUGGESTIONS: Record<SocialStyle, string[]> = {
+// Same per-persona pointers we anchor in the post-call Summary, but exposed
+// for the in-call coaching panel so participants can stay aligned to the
+// style *while* they talk — not just learn after the fact.
+export const LIVE_STYLE_TIPS: Record<SocialStyle, string[]> = {
   analytical: [
     "Lead with the number, then the inference.",
     "Name your assumptions so Morgan can audit them.",
@@ -251,13 +254,13 @@ export function summarizeCall(
     });
   const fallback = userTurns.filter((t) => !ranked.some((r) => r.turn === t));
   const quotes: (string | undefined)[] = [];
-  for (let i = 0; i < SUGGESTIONS[persona.id].length; i++) {
+  for (let i = 0; i < LIVE_STYLE_TIPS[persona.id].length; i++) {
     if (i < ranked.length) quotes.push(ranked[i].turn.text);
     else if (i - ranked.length < fallback.length) quotes.push(fallback[i - ranked.length].text);
     else quotes.push(undefined);
   }
 
-  const suggestions: AnchoredSuggestion[] = SUGGESTIONS[persona.id]
+  const suggestions: AnchoredSuggestion[] = LIVE_STYLE_TIPS[persona.id]
     .slice(0, 3)
     .map((text, i) => ({ text, quotedLine: quotes[i] }));
 

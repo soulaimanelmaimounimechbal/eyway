@@ -7,6 +7,7 @@ import { Mic, MicOff, PhoneOff, Loader2, MessageSquareWarning, Lightbulb, X, Han
 import { cn } from "@/lib/utils";
 import {
   evaluateTurn,
+  LIVE_STYLE_TIPS,
   pickNudge,
   TURN_SIGNAL_CLASSES,
   type CoachingNudge,
@@ -517,7 +518,7 @@ export default function Conversation({
                 </div>
               )}
             </div>
-            {nudge ? (
+            {nudge && (
               <div
                 className="rounded-2xl border border-primary/40 bg-primary/5 p-4 shadow-sm"
                 data-testid="coaching-nudge"
@@ -541,21 +542,41 @@ export default function Conversation({
                   </button>
                 </div>
               </div>
-            ) : (
-              <div className="rounded-2xl border bg-card p-4 shadow-sm">
-                <h4 className="text-sm font-semibold">Guidance</h4>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {pttMode === "hold"
-                    ? "Hold the Speak button (or press and hold Space) while you talk. Release when you're done."
-                    : "Tap to start speaking, tap again when you're done."}
-                </p>
-                <ul className="mt-3 space-y-1.5 text-xs text-muted-foreground">
-                  <li>· Up to {MAX_TURNS} of your turns or 5 minutes</li>
-                  <li>· End the call whenever you feel done</li>
-                  <li>· They react to your style, not just your words</li>
-                </ul>
-              </div>
             )}
+            {/* Persistent style coach: the main thing participants should be
+                thinking about mid-call is matching the persona's style, not
+                what facts to recite. These pointers stay visible for the
+                whole call so they're a glance away while speaking. */}
+            <div
+              className="rounded-2xl border bg-card p-4 shadow-sm"
+              data-testid="style-tips"
+              data-persona={agent.id}
+            >
+              <div className="flex items-center gap-2">
+                <Lightbulb className="h-4 w-4 text-primary" />
+                <h4 className="text-sm font-semibold">
+                  Match {agent.name}'s style
+                </h4>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {agent.tone}
+              </p>
+              <ul className="mt-3 space-y-2 text-sm leading-snug text-foreground">
+                {LIVE_STYLE_TIPS[agent.id].map((tip, i) => (
+                  <li
+                    key={i}
+                    className="flex gap-2"
+                    data-testid={`style-tip-${i}`}
+                  >
+                    <span aria-hidden className="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-primary/70" />
+                    <span>{tip}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-[11px] text-muted-foreground">
+                They react to <em>how</em> you say it, not just what you say.
+              </p>
+            </div>
           </aside>
         </div>
 
