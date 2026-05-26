@@ -260,23 +260,35 @@ export default function Conversation({
       const tag = t.tagName;
       return tag === "INPUT" || tag === "TEXTAREA" || t.isContentEditable;
     };
+    // Track whether *this* keyboard binding engaged the mic, so the blur
+    // fallback below releases ONLY for keyboard-initiated holds. Without
+    // this flag, blur would also kill an in-progress pointer hold every
+    // time the Replit preview iframe lost focus.
+    let spaceEngaged = false;
     const onDown = (e: KeyboardEvent) => {
       if (e.code !== "Space" || e.repeat) return;
       if (isTypingTarget(e.target)) return;
       e.preventDefault();
+      spaceEngaged = true;
       engageMic();
     };
     const onUp = (e: KeyboardEvent) => {
       if (e.code !== "Space") return;
       if (isTypingTarget(e.target)) return;
       e.preventDefault();
+      spaceEngaged = false;
       releaseMic();
     };
-    // Blur fallback for the keyboard path only: if the user alt-tabs or
-    // otherwise loses focus while holding Space, the keyup never fires
-    // and the mic would be stranded open. Pointer hold deliberately does
-    // NOT use blur (see PushToTalkButton effect).
-    const onBlur = () => { releaseMic(); };
+    // Blur fallback ONLY for keyboard-initiated holds: if the user alt-tabs
+    // while holding Space the keyup never fires and the mic would be
+    // stranded open. We gate on `spaceEngaged` so the pointer-hold path
+    // (which can legitimately span workspace clicks that blur the Replit
+    // preview iframe) is untouched.
+    const onBlur = () => {
+      if (!spaceEngaged) return;
+      spaceEngaged = false;
+      releaseMic();
+    };
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
     window.addEventListener("blur", onBlur);
@@ -699,17 +711,28 @@ function PushToTalkButton({
 }) {
   // Pointer-based hold: pointerdown sets pointer capture on the button
   // (see onPointerDown below) so the gesture is owned by that pointer
-  // until a real pointerup/pointercancel from the same pointer. We keep
-  // window-level listeners as a belt-and-braces fallback for browsers /
-  // input devices where capture is unreliable.
+  // until a real pointerup/pointercancel from the same pointer. The
+  // active pointerId is tracked in a ref so the window-level fallback
+  // listeners only fire for the *originating* pointer — otherwise an
+  // unrelated pointer (e.g. a second finger, or a synthetic event from
+  // another widget) could end the hold.
   //
   // Deliberately NO window `blur` listener here: this UI runs inside the
   // Replit preview iframe, where any click on the surrounding workspace
   // chat blurs the iframe window and was killing in-progress holds
   // mid-sentence (see task #21).
+  const activePointerIdRef = useRef<number | null>(null);
   useEffect(() => {
     if (mode !== "hold" || !micActive) return;
-    const end = () => onRelease();
+    const end = (e: PointerEvent) => {
+      const active = activePointerIdRef.current;
+      // Only release for the originating pointer. If we don't know the
+      // active pointerId (e.g. capture failed to set), fall back to
+      // releasing for any pointer so the mic never strands open.
+      if (active !== null && e.pointerId !== active) return;
+      activePointerIdRef.current = null;
+      onRelease();
+    };
     window.addEventListener("pointerup", end);
     window.addEventListener("pointercancel", end);
     return () => {
@@ -744,11 +767,18 @@ function PushToTalkButton({
           // Capture the pointer to this button so subsequent pointerup /
           // pointercancel from the same pointer route here even if the
           // user drags off the button, and so other elements can't steal
-          // the gesture mid-hold.
+          // the gesture mid-hold. Record the pointerId so the window-level
+          // fallback only ends the hold for this exact pointer.
+          activePointerIdRef.current = e.pointerId;
           try { (e.currentTarget as Element).setPointerCapture?.(e.pointerId); } catch { /* ignore */ }
           onEngage();
         }}
-        onLostPointerCapture={() => { if (micActive) onRelease(); }}
+        onLostPointerCapture={(e) => {
+          if (activePointerIdRef.current === e.pointerId) {
+            activePointerIdRef.current = null;
+            if (micActive) onRelease();
+          }
+        }}
         // pointerup also handled at window level (see effect above) as a
         // belt-and-braces fallback for releases outside the button bounds.
         onContextMenu={(e) => e.preventDefault()}
