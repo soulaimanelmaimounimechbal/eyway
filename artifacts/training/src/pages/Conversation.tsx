@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { ProgressDots } from "@/components/ProgressDots";
 import { AGENTS, type SocialStyle } from "@/lib/agents";
 import { VoiceClient, type TranscriptEntry, type VoiceState } from "@/lib/voice-client";
-import { Mic, MicOff, PhoneOff, Loader2, MessageSquareWarning, Lightbulb, X } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Loader2, MessageSquareWarning, Lightbulb, X, Hand, MousePointerClick } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   evaluateTurn,
@@ -17,6 +17,16 @@ import { emit } from "@/lib/telemetry";
 const MAX_TURNS = 10;
 const MAX_SECONDS = 300;
 const WARN_SECONDS = 30;
+
+type PttMode = "hold" | "tap";
+const PTT_MODE_KEY = "training.pttMode";
+function loadPttMode(): PttMode {
+  try {
+    const v = localStorage.getItem(PTT_MODE_KEY);
+    if (v === "hold" || v === "tap") return v;
+  } catch { /* noop */ }
+  return "hold";
+}
 
 type EndReason = "manual" | "back" | "time_up" | "turns_up" | "terminal";
 
@@ -44,8 +54,11 @@ export default function Conversation({
   const [micLevel, setMicLevel] = useState(0);
   const [assistantLevel, setAssistantLevel] = useState(0);
   const [silenceHint, setSilenceHint] = useState(false);
-  const [muted, setMuted] = useState(false);
+  const [micActive, setMicActive] = useState(false);
+  const [pttMode, setPttMode] = useState<PttMode>(loadPttMode);
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const micEngagedAtRef = useRef<number | null>(null);
+  const turnIndexRef = useRef(0);
   const [warningShownAt30s, setWarningShownAt30s] = useState(false);
   const [showSignals, setShowSignals] = useState(true);
   const [nudge, setNudge] = useState<CoachingNudge | null>(null);
@@ -202,12 +215,79 @@ export default function Conversation({
     void endCall(timeUp ? "time_up" : "turns_up");
   }, [shouldAutoEnd, timeUp, endCall]);
 
-  function toggleMute() {
+  const engageMic = useCallback(() => {
     const c = clientRef.current;
-    if (!c) return;
-    const next = !muted;
-    c.setMuted(next);
-    setMuted(next);
+    if (!c || micActive) return;
+    if (assistantSpeaking || state !== "listening") return;
+    c.engageMic();
+    setMicActive(true);
+    micEngagedAtRef.current = Date.now();
+    turnIndexRef.current += 1;
+    emit("mic_engaged", { turnIndex: turnIndexRef.current, persona: style });
+  }, [micActive, assistantSpeaking, state, style]);
+
+  const releaseMic = useCallback(() => {
+    const c = clientRef.current;
+    if (!c || !micActive) return;
+    c.releaseMic();
+    setMicActive(false);
+    const startedAt = micEngagedAtRef.current;
+    micEngagedAtRef.current = null;
+    const durationMs = startedAt ? Date.now() - startedAt : 0;
+    emit("mic_released", { turnIndex: turnIndexRef.current, durationMs, persona: style });
+  }, [micActive, style]);
+
+  // Persist push-to-talk mode choice across sessions.
+  useEffect(() => {
+    try { localStorage.setItem(PTT_MODE_KEY, pttMode); } catch { /* noop */ }
+  }, [pttMode]);
+
+  // Switching modes mid-call must not leave the mic stuck open.
+  useEffect(() => {
+    if (micActive) releaseMic();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pttMode]);
+
+  // Space-bar hold binding (hold-to-talk mode only). Ignore when the user
+  // is typing in a text field or the call isn't in a usable state.
+  useEffect(() => {
+    if (pttMode !== "hold") return;
+    const isTypingTarget = (t: EventTarget | null) => {
+      if (!(t instanceof HTMLElement)) return false;
+      const tag = t.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || t.isContentEditable;
+    };
+    const onDown = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || e.repeat) return;
+      if (isTypingTarget(e.target)) return;
+      e.preventDefault();
+      engageMic();
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      if (isTypingTarget(e.target)) return;
+      e.preventDefault();
+      releaseMic();
+    };
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+    };
+  }, [pttMode, engageMic, releaseMic]);
+
+  // Auto-release if the call goes away or the assistant starts speaking
+  // (the user has clearly finished their turn).
+  useEffect(() => {
+    if (micActive && (assistantSpeaking || state !== "listening")) {
+      releaseMic();
+    }
+  }, [micActive, assistantSpeaking, state, releaseMic]);
+
+  function toggleTap() {
+    if (micActive) releaseMic();
+    else engageMic();
   }
 
   function requestEnd(reason: EndReason) {
@@ -290,7 +370,7 @@ export default function Conversation({
           </div>
         </div>
 
-        <CallStateBadge state={state} assistantSpeaking={assistantSpeaking} muted={muted} />
+        <CallStateBadge state={state} assistantSpeaking={assistantSpeaking} micActive={micActive} pttMode={pttMode} />
 
         <div className="grid flex-1 gap-4 md:grid-cols-[1fr_300px]">
           <div className="rounded-2xl border bg-card p-4 shadow-sm">
@@ -368,25 +448,56 @@ export default function Conversation({
             <div className="rounded-2xl border bg-card p-4 shadow-sm">
               <div className="flex items-center justify-between">
                 <div className="text-xs uppercase tracking-wider text-muted-foreground">Your mic</div>
-                <button
-                  onClick={toggleMute}
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold hover-elevate",
-                    muted ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border bg-background",
-                  )}
-                  data-testid="button-mute"
+                <div
+                  className="inline-flex overflow-hidden rounded-full border text-[11px] font-semibold"
+                  role="radiogroup"
+                  aria-label="Push-to-talk mode"
+                  data-testid="ptt-mode-toggle"
                 >
-                  {muted ? <><MicOff className="h-3.5 w-3.5" /> Muted</> : <><Mic className="h-3.5 w-3.5" /> Mute</>}
-                </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={pttMode === "hold"}
+                    onClick={() => setPttMode("hold")}
+                    className={cn(
+                      "inline-flex items-center gap-1 px-2.5 py-1 hover-elevate",
+                      pttMode === "hold" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground",
+                    )}
+                    data-testid="button-ptt-mode-hold"
+                  >
+                    <Hand className="h-3 w-3" /> Hold
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={pttMode === "tap"}
+                    onClick={() => setPttMode("tap")}
+                    className={cn(
+                      "inline-flex items-center gap-1 px-2.5 py-1 hover-elevate",
+                      pttMode === "tap" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground",
+                    )}
+                    data-testid="button-ptt-mode-tap"
+                  >
+                    <MousePointerClick className="h-3 w-3" /> Tap
+                  </button>
+                </div>
               </div>
-              <MicVisualizer level={micLevel} muted={muted} />
-              {silenceHint && !muted && (
+              <PushToTalkButton
+                mode={pttMode}
+                micActive={micActive}
+                disabled={state !== "listening" || assistantSpeaking}
+                onEngage={engageMic}
+                onRelease={releaseMic}
+                onTapToggle={toggleTap}
+              />
+              <MicVisualizer level={micLevel} muted={!micActive} />
+              {silenceHint && micActive && (
                 <div
                   className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-900 dark:text-amber-100"
                   data-testid="silence-hint"
                 >
                   <MessageSquareWarning className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>Speak naturally — we're not picking up your voice.</span>
+                  <span>We're not picking up your voice — speak up or check your mic.</span>
                 </div>
               )}
               <div className="mt-3 grid grid-cols-2 gap-3">
@@ -432,7 +543,9 @@ export default function Conversation({
               <div className="rounded-2xl border bg-card p-4 shadow-sm">
                 <h4 className="text-sm font-semibold">Guidance</h4>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Speak naturally — there's no push-to-talk. Pause to let them respond.
+                  {pttMode === "hold"
+                    ? "Hold the Speak button (or press and hold Space) while you talk. Release when you're done."
+                    : "Tap to start speaking, tap again when you're done."}
                 </p>
                 <ul className="mt-3 space-y-1.5 text-xs text-muted-foreground">
                   <li>· Up to {MAX_TURNS} of your turns or 5 minutes</li>
@@ -461,12 +574,12 @@ export default function Conversation({
 
       <footer className="flex items-center justify-between pt-6">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          {state === "listening" && !muted ? (
-            <><Mic className="h-4 w-4 text-emerald-500" /> Mic live</>
-          ) : muted ? (
-            <><MicOff className="h-4 w-4 text-destructive" /> Muted</>
-          ) : state === "connecting" ? (
+          {state === "connecting" ? (
             <><Loader2 className="h-4 w-4 animate-spin" /> Connecting…</>
+          ) : micActive ? (
+            <><Mic className="h-4 w-4 text-emerald-500" /> Mic live</>
+          ) : state === "listening" ? (
+            <><MicOff className="h-4 w-4" /> {pttMode === "hold" ? "Mic off — hold to speak" : "Mic off — tap to speak"}</>
           ) : (
             <><MicOff className="h-4 w-4" /> Mic off</>
           )}
@@ -523,6 +636,88 @@ function ConfirmEndDialog({
         </div>
       </div>
     </div>
+  );
+}
+
+function PushToTalkButton({
+  mode,
+  micActive,
+  disabled,
+  onEngage,
+  onRelease,
+  onTapToggle,
+}: {
+  mode: PttMode;
+  micActive: boolean;
+  disabled: boolean;
+  onEngage: () => void;
+  onRelease: () => void;
+  onTapToggle: () => void;
+}) {
+  // Pointer-based hold: we attach pointerup/cancel to window so a release
+  // outside the button still ends the turn — otherwise dragging off the
+  // button would strand the mic open.
+  useEffect(() => {
+    if (mode !== "hold" || !micActive) return;
+    const end = () => onRelease();
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    window.addEventListener("blur", end);
+    return () => {
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      window.removeEventListener("blur", end);
+    };
+  }, [mode, micActive, onRelease]);
+
+  const baseClass =
+    "mt-3 flex w-full select-none items-center justify-center gap-2 rounded-2xl border-2 px-4 py-4 text-sm font-semibold transition-colors";
+  const stateClass = disabled
+    ? "cursor-not-allowed border-border bg-muted text-muted-foreground opacity-60"
+    : micActive
+    ? "border-emerald-500 bg-emerald-500 text-white shadow-md"
+    : "border-primary/40 bg-primary/5 text-primary hover-elevate";
+
+  const label = disabled
+    ? "Mic unavailable"
+    : micActive
+    ? mode === "hold" ? "Listening… release to send" : "Listening… tap to send"
+    : mode === "hold" ? "Hold to speak" : "Tap to speak";
+  const hint = mode === "hold" ? "or hold Space" : null;
+
+  if (mode === "hold") {
+    return (
+      <button
+        type="button"
+        disabled={disabled}
+        onPointerDown={(e) => { if (disabled) return; e.preventDefault(); onEngage(); }}
+        // pointerup handled at window level (see effect above) so releases
+        // outside the button bounds still commit the turn.
+        onContextMenu={(e) => e.preventDefault()}
+        className={cn(baseClass, stateClass)}
+        data-testid="button-ptt-hold"
+        data-active={micActive}
+        aria-pressed={micActive}
+      >
+        {micActive ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+        <span>{label}</span>
+        {hint && !micActive && <span className="ml-1 text-[10px] font-normal opacity-70">({hint})</span>}
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => { if (!disabled) onTapToggle(); }}
+      className={cn(baseClass, stateClass)}
+      data-testid="button-ptt-tap"
+      data-active={micActive}
+      aria-pressed={micActive}
+    >
+      {micActive ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+      <span>{label}</span>
+    </button>
   );
 }
 
@@ -603,11 +798,12 @@ function Stat({
 function CallStateBadge({
   state,
   assistantSpeaking,
-  muted,
-}: { state: VoiceState; assistantSpeaking: boolean; muted: boolean }) {
-  // Effective label collapses the underlying state machine into the four
-  // user-meaningful modes called out in the task: Listening / Thinking /
-  // Speaking / Reconnecting (plus connecting/ended bookends).
+  micActive,
+  pttMode,
+}: { state: VoiceState; assistantSpeaking: boolean; micActive: boolean; pttMode: PttMode }) {
+  // Effective label collapses the underlying state machine into the
+  // user-meaningful modes. With push-to-talk the mic is muted by default,
+  // so the "ready to listen" idle state is the dominant one between turns.
   let label = "Idle";
   let tone: "neutral" | "live" | "thinking" | "speaking" | "warn" | "bad" = "neutral";
   let pulse = false;
@@ -617,10 +813,10 @@ function CallStateBadge({
   else if (state === "closing") { label = "Ending…"; tone = "neutral"; }
   else if (state === "closed") { label = "Call ended"; tone = "neutral"; }
   else if (state === "error") { label = "Connection error"; tone = "bad"; }
-  else if (assistantSpeaking) { label = muted ? "Speaking · you're muted" : "Speaking"; tone = "speaking"; pulse = true; }
+  else if (assistantSpeaking) { label = "Speaking"; tone = "speaking"; pulse = true; }
   else if (state === "listening" || state === "ready") {
-    if (muted) { label = "You're muted"; tone = "warn"; }
-    else { label = "Listening"; tone = "live"; pulse = true; }
+    if (micActive) { label = "Listening…"; tone = "live"; pulse = true; }
+    else { label = pttMode === "hold" ? "Mic off — hold to speak" : "Mic off — tap to speak"; tone = "neutral"; }
   }
 
   const toneClass = {

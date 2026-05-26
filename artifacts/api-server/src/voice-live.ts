@@ -62,6 +62,8 @@ const ALLOWED_TELEMETRY_EVENTS = new Set([
   "reconnect_attempted",
   "reconnect_succeeded",
   "call_ended",
+  "mic_engaged",
+  "mic_released",
   "error",
 ]);
 const MAX_TELEMETRY_BODY_BYTES = 4_096;
@@ -605,16 +607,26 @@ async function handleClient(client: WsWebSocket): Promise<void> {
           voice: { type: "azure-standard", name: candidate },
           inputAudioFormat: "pcm16",
           outputAudioFormat: "pcm16",
-          turnDetection: {
-            type: "server_vad",
-            threshold: 0.5,
-            prefixPaddingInMs: 300,
-            silenceDurationInMs: 500,
-          },
+          // Server VAD disabled — client drives turn boundaries via
+          // push-to-talk. The model only generates a response when the
+          // client sends an explicit input_audio_buffer.commit +
+          // response.create pair (see the JSON "commit" branch below).
           inputAudioEchoCancellation: { type: "server_echo_cancellation" },
           inputAudioNoiseReduction: { type: "azure_deep_noise_suppression" },
           inputAudioTranscription: { model: "azure-speech" },
         });
+        // Belt-and-braces: the SDK has no first-class "disable VAD" so we
+        // patch the raw session afterwards. Azure's realtime contract is
+        // `turn_detection: null` to disable; sending it explicitly avoids
+        // any server-side default kicking back in.
+        try {
+          await session.sendEvent({
+            type: "session.update",
+            session: { turn_detection: null },
+          } as unknown as Parameters<typeof session.sendEvent>[0]);
+        } catch (err) {
+          logger.warn({ err: (err as Error).message }, "voice-live: failed to disable server VAD");
+        }
         chosenVoice = candidate;
         if (candidate !== start.voice) {
           logger.warn({ requested: start.voice, used: candidate }, "voice-live: voice fallback used");
@@ -674,16 +686,45 @@ async function handleClient(client: WsWebSocket): Promise<void> {
     return;
   }
 
-  // From this point: any binary message from the client is mic PCM16 audio.
-  client.on("message", (data) => {
+  // From this point: binary frames from the client are mic PCM16 audio;
+  // text frames are turn-control signals from the push-to-talk UI
+  // ({"type":"commit"} on mic release, {"type":"clear"} to drop a buffer).
+  client.on("message", (data, isBinary) => {
     if (!session.isConnected) return;
+    if (!isBinary) {
+      try {
+        const text = data instanceof Buffer ? data.toString("utf-8") : String(data);
+        const msg = JSON.parse(text) as { type?: string };
+        if (msg.type === "commit") {
+          // Drop commits while a response is already being generated — a
+          // double-tap on the PTT button (or a Space-up racing a click)
+          // would otherwise fire two response.create events for one turn.
+          if (responseInFlight) {
+            logger.debug("commit ignored: response already in flight");
+            return;
+          }
+          responseInFlight = true;
+          void (async () => {
+            try {
+              await session.sendEvent({ type: "input_audio_buffer.commit" });
+              await session.sendEvent({ type: "response.create" });
+            } catch (err) {
+              responseInFlight = false;
+              logger.debug({ err: (err as Error).message }, "commit failed");
+            }
+          })();
+        } else if (msg.type === "clear") {
+          void session.sendEvent({ type: "input_audio_buffer.clear" }).catch(() => {});
+        }
+      } catch { /* ignore unparseable control frames */ }
+      return;
+    }
     if (data instanceof Buffer) {
       const u8 = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
       session.sendAudio(u8).catch((err: Error) => {
         logger.debug({ err: err.message }, "sendAudio failed");
       });
     }
-    // Ignore stray JSON after start; we drive everything from server VAD.
   });
 
   client.on("close", () => { void cleanup(); });

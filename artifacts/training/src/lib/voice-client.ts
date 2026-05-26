@@ -52,7 +52,13 @@ export class VoiceClient {
   private transcript: TranscriptEntry[] = [];
   private playQueueEndsAt = 0;
   private outstandingSources: AudioOut[] = [];
-  private muted = false;
+  // Push-to-talk: mic is muted by default. The UI calls engageMic() while
+  // the user holds (or after they tap) the speak button, and releaseMic()
+  // when they let go, which commits the audio buffer upstream so the model
+  // generates a response.
+  private muted = true;
+  private micActive = false;
+  private audioSentSinceEngage = false;
   private lastErrorMessage = "";
   private readyAt = 0;
   private reconnectAttempted = false;
@@ -72,21 +78,47 @@ export class VoiceClient {
     return this.transcript;
   }
 
-  setMuted(m: boolean) {
-    this.muted = m;
+  private applyMuteToTracks() {
     if (this.micStream) {
-      this.micStream.getAudioTracks().forEach((t) => { t.enabled = !m; });
-    }
-    // Muting can't be "no input we missed" — clear any stale silence hint.
-    if (m && this.silenceHintActive) {
-      this.silenceHintActive = false;
-      this.events.onSilenceHint?.(false);
-    }
-    if (!m) {
-      this.lastInputAboveFloorAt = Date.now();
+      this.micStream.getAudioTracks().forEach((t) => { t.enabled = !this.muted; });
     }
   }
 
+  /**
+   * Open the mic and start streaming PCM upstream. The server's VAD is
+   * disabled, so no response will fire until releaseMic() commits.
+   */
+  engageMic() {
+    if (this.micActive) return;
+    this.micActive = true;
+    this.muted = false;
+    this.audioSentSinceEngage = false;
+    this.lastInputAboveFloorAt = Date.now();
+    this.applyMuteToTracks();
+  }
+
+  /**
+   * Close the mic. If we streamed at least one frame, commit the buffer
+   * so the model produces a response; otherwise clear it so we don't
+   * provoke an "empty buffer" error from upstream.
+   */
+  releaseMic() {
+    if (!this.micActive) return;
+    this.micActive = false;
+    this.muted = true;
+    this.applyMuteToTracks();
+    if (this.silenceHintActive) {
+      this.silenceHintActive = false;
+      this.events.onSilenceHint?.(false);
+    }
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const payload = JSON.stringify({ type: this.audioSentSinceEngage ? "commit" : "clear" });
+      try { this.ws.send(payload); } catch { /* swallow */ }
+    }
+    this.audioSentSinceEngage = false;
+  }
+
+  isMicActive(): boolean { return this.micActive; }
   isMuted(): boolean { return this.muted; }
 
   async start(): Promise<void> {
@@ -280,6 +312,16 @@ export class VoiceClient {
 
   private async handleSocketClose() {
     if (this.isTerminating()) return;
+    // If the user was actively speaking when the socket dropped, drop the
+    // mic state so we don't later try to commit over a dead/new session.
+    // The UI watches `state` and will reset its own micActive via its
+    // auto-release effect; this just makes the VoiceClient consistent.
+    if (this.micActive) {
+      this.micActive = false;
+      this.muted = true;
+      this.audioSentSinceEngage = false;
+      this.applyMuteToTracks();
+    }
     const eligibleForReconnect =
       !this.reconnectAttempted &&
       this.readyAt > 0 &&
@@ -317,6 +359,7 @@ export class VoiceClient {
     const buf = new ArrayBuffer(pcm.byteLength);
     new Int16Array(buf).set(pcm);
     this.ws.send(buf);
+    this.audioSentSinceEngage = true;
   }
 
   private handleServerMessage(raw: unknown) {

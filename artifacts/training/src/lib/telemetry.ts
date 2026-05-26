@@ -15,6 +15,8 @@ export type TelemetryEvent =
   | "reconnect_attempted"
   | "reconnect_succeeded"
   | "call_ended"
+  | "mic_engaged"
+  | "mic_released"
   | "error";
 
 const ALLOWED: Record<TelemetryEvent, true> = {
@@ -27,6 +29,8 @@ const ALLOWED: Record<TelemetryEvent, true> = {
   reconnect_attempted: true,
   reconnect_succeeded: true,
   call_ended: true,
+  mic_engaged: true,
+  mic_released: true,
   error: true,
 };
 
