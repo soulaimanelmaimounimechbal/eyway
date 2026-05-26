@@ -272,21 +272,41 @@ export default function Conversation({
       e.preventDefault();
       releaseMic();
     };
+    // Blur fallback for the keyboard path only: if the user alt-tabs or
+    // otherwise loses focus while holding Space, the keyup never fires
+    // and the mic would be stranded open. Pointer hold deliberately does
+    // NOT use blur (see PushToTalkButton effect).
+    const onBlur = () => { releaseMic(); };
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
+    window.addEventListener("blur", onBlur);
     return () => {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
+      window.removeEventListener("blur", onBlur);
     };
   }, [pttMode, engageMic, releaseMic]);
 
-  // Auto-release if the call goes away or the assistant starts speaking
-  // (the user has clearly finished their turn).
+  // Auto-release contract (do NOT loosen without re-reading task #21):
+  // While the user is holding the mic we must NOT cut them off on a
+  // transient signal. Only release when:
+  //   - the session has terminally failed (error / closed / closing), OR
+  //   - the assistant is *actually playing audio* (assistantSpeaking flag
+  //     alone races: it can flip true the instant we send response.create
+  //     and before any audio frame arrives, which used to kill a hold
+  //     mid-sentence). We require assistantLevel > 0 as the corroborating
+  //     "audio is really coming out of the speaker" signal.
+  // A blip into `reconnecting` is explicitly survivable — the voice client
+  // is designed to recover within RECONNECT_WINDOW_MS and yanking the mic
+  // during that window would surprise a user who's still mid-thought.
   useEffect(() => {
-    if (micActive && (assistantSpeaking || state !== "listening")) {
+    if (!micActive) return;
+    const sessionDead = state === "error" || state === "closed" || state === "closing";
+    const assistantActuallyPlaying = assistantSpeaking && assistantLevel > 0;
+    if (sessionDead || assistantActuallyPlaying) {
       releaseMic();
     }
-  }, [micActive, assistantSpeaking, state, releaseMic]);
+  }, [micActive, assistantSpeaking, assistantLevel, state, releaseMic]);
 
   function toggleTap() {
     if (micActive) releaseMic();
@@ -677,19 +697,24 @@ function PushToTalkButton({
   onRelease: () => void;
   onTapToggle: () => void;
 }) {
-  // Pointer-based hold: we attach pointerup/cancel to window so a release
-  // outside the button still ends the turn — otherwise dragging off the
-  // button would strand the mic open.
+  // Pointer-based hold: pointerdown sets pointer capture on the button
+  // (see onPointerDown below) so the gesture is owned by that pointer
+  // until a real pointerup/pointercancel from the same pointer. We keep
+  // window-level listeners as a belt-and-braces fallback for browsers /
+  // input devices where capture is unreliable.
+  //
+  // Deliberately NO window `blur` listener here: this UI runs inside the
+  // Replit preview iframe, where any click on the surrounding workspace
+  // chat blurs the iframe window and was killing in-progress holds
+  // mid-sentence (see task #21).
   useEffect(() => {
     if (mode !== "hold" || !micActive) return;
     const end = () => onRelease();
     window.addEventListener("pointerup", end);
     window.addEventListener("pointercancel", end);
-    window.addEventListener("blur", end);
     return () => {
       window.removeEventListener("pointerup", end);
       window.removeEventListener("pointercancel", end);
-      window.removeEventListener("blur", end);
     };
   }, [mode, micActive, onRelease]);
 
@@ -713,9 +738,19 @@ function PushToTalkButton({
       <button
         type="button"
         disabled={disabled}
-        onPointerDown={(e) => { if (disabled) return; e.preventDefault(); onEngage(); }}
-        // pointerup handled at window level (see effect above) so releases
-        // outside the button bounds still commit the turn.
+        onPointerDown={(e) => {
+          if (disabled) return;
+          e.preventDefault();
+          // Capture the pointer to this button so subsequent pointerup /
+          // pointercancel from the same pointer route here even if the
+          // user drags off the button, and so other elements can't steal
+          // the gesture mid-hold.
+          try { (e.currentTarget as Element).setPointerCapture?.(e.pointerId); } catch { /* ignore */ }
+          onEngage();
+        }}
+        onLostPointerCapture={() => { if (micActive) onRelease(); }}
+        // pointerup also handled at window level (see effect above) as a
+        // belt-and-braces fallback for releases outside the button bounds.
         onContextMenu={(e) => e.preventDefault()}
         className={cn(baseClass, stateClass)}
         data-testid="button-ptt-hold"

@@ -38,7 +38,8 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- **Hold-to-talk contract (Conversation.tsx).** The mic must stay open until the user physically releases. Auto-release fires only on terminal session states (`error` / `closed` / `closing`) or when the assistant is *actually playing audio* (`assistantSpeaking && assistantLevel > 0`); never on `assistantSpeaking` alone (it races the model's `response.create`) and never on `reconnecting` (transient by design).
+- **Pointer hold uses `setPointerCapture` + `pointerup`/`pointercancel` only — no window `blur` listener.** The training UI runs inside the Replit preview iframe, where clicking the workspace chat blurs the iframe window; a blur listener there cut holds off mid-sentence. The keyboard (Space) hold path *does* use `blur` as a fallback because alt-tabbing otherwise strands the mic.
 
 ## Pointers
 
