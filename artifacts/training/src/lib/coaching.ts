@@ -223,6 +223,39 @@ export const LIVE_STYLE_TIPS: Record<SocialStyle, string[]> = {
   ],
 };
 
+// Content scaffolding for the Glenara/sustainability-report scenario. This is
+// scenario-scoped, NOT persona-scoped — the same situation is shared across all
+// four personas, so the substance is identical for every call. The participant's
+// job is to deliver these in the persona's *style* (that's what LIVE_STYLE_TIPS
+// is for). Each bullet is one pickable line, not a script to read verbatim.
+export type TalkingPointGroup = { heading: string; points: string[] };
+
+export const SCENARIO_TALKING_POINTS: TalkingPointGroup[] = [
+  {
+    heading: "What happened with the report",
+    points: [
+      "The underlying data is correct — the issue was how parts were presented, not what was measured.",
+      "A few sections were easy to misread out of context, which is what fed the internal pushback.",
+    ],
+  },
+  {
+    heading: "What you can commit to right now",
+    points: [
+      "I can have a one-pager clarifying the methodology by end of day.",
+      "We'll add a footnote and short appendix on the contested section before tomorrow's update.",
+      "I'll flag exactly which figures are final versus still being reviewed.",
+    ],
+  },
+  {
+    heading: "What we'll do next",
+    points: [
+      "A stakeholder Q&A doc to get ahead of the common questions by Thursday.",
+      "A joint review with your internal team next week to rebuild confidence.",
+      "A quick pre-brief for leadership before the update lands.",
+    ],
+  },
+];
+
 export function summarizeCall(
   transcript: TranscriptEntry[],
   persona: AgentConfig,

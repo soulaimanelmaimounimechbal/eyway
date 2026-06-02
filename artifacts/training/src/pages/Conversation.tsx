@@ -3,12 +3,13 @@ import { Button } from "@/components/ui/button";
 import { ProgressDots } from "@/components/ProgressDots";
 import { AGENTS, DEFAULT_INTENSITY, type Intensity, type SocialStyle } from "@/lib/agents";
 import { VoiceClient, type TranscriptEntry, type VoiceState } from "@/lib/voice-client";
-import { Mic, MicOff, PhoneOff, Loader2, MessageSquareWarning, Lightbulb, X, Hand, MousePointerClick } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Loader2, MessageSquareWarning, Lightbulb, X, Hand, MousePointerClick, ClipboardList, ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   evaluateTurn,
   LIVE_STYLE_TIPS,
   pickNudge,
+  SCENARIO_TALKING_POINTS,
   TURN_SIGNAL_CLASSES,
   type CoachingNudge,
   type TurnEvaluation,
@@ -609,6 +610,7 @@ export default function Conversation({
                 They react to <em>how</em> you say it, not just what you say.
               </p>
             </div>
+            <TalkingPointsPanel personaName={agent.name} />
           </aside>
         </div>
 
@@ -690,6 +692,58 @@ function ConfirmEndDialog({
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Content companion to the style panel. Scenario-scoped substance so the
+// participant can pick a point and spend their attention on *delivering* it in
+// the persona's style. Softer/secondary styling + a distinct icon so it reads
+// as "substance", not a second style panel. Expanded by default; collapse state
+// is intentionally local (fresh call = fresh expand).
+function TalkingPointsPanel({ personaName }: { personaName: string }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div
+      className="rounded-2xl border border-dashed bg-muted/30 p-4"
+      data-testid="talking-points"
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 rounded text-left hover-elevate"
+        aria-expanded={open}
+        data-testid="button-toggle-talking-points"
+      >
+        <ClipboardList className="h-4 w-4 text-muted-foreground" />
+        <h4 className="flex-1 text-sm font-semibold text-foreground">Talking points</h4>
+        <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+          {open ? "Hide" : "Show"}
+          {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3">
+          {SCENARIO_TALKING_POINTS.map((group, gi) => (
+            <div key={gi} data-testid={`talking-point-group-${gi}`}>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {group.heading}
+              </div>
+              <ul className="mt-1.5 space-y-1.5 text-sm leading-snug text-foreground/90">
+                {group.points.map((point, pi) => (
+                  <li key={pi} className="flex gap-2" data-testid={`talking-point-${gi}-${pi}`}>
+                    <span aria-hidden className="mt-1.5 inline-block h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60" />
+                    <span>{point}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <p className="border-t pt-3 text-[11px] text-muted-foreground">
+            Use these as raw material. Your job is to match {personaName}'s style — that's what's being practised here.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
