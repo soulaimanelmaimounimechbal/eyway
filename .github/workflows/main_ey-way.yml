@@ -74,4 +74,8 @@ jobs:
           app-name: "ey-way"
           slot-name: "Production"
           package: deploy
-          startup-command: "node dist/index.mjs"
+          # NODE_ENV=production is REQUIRED: the logger only uses the pino-pretty
+          # transport (a worker thread whose path is baked at build time and does
+          # not exist on Azure) when NODE_ENV !== "production". Forcing it here
+          # makes the server log plain JSON to stdout with no worker.
+          startup-command: "NODE_ENV=production node dist/index.mjs"

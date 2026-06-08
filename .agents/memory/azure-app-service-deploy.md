@@ -50,12 +50,21 @@ serves the built frontend, and CI ships one self-contained package.
 - **Enable Web Sockets = On** (Configuration → General settings). Off by default;
   the voice feature uses a WS upgrade at `/api/voice-live` and will not work
   without it.
-- Startup command `node dist/index.mjs` (set by the workflow's
-  `webapps-deploy` `startup-command`).
+- Startup command `NODE_ENV=production node dist/index.mjs` (set by the workflow's
+  `webapps-deploy` `startup-command`). **`NODE_ENV=production` is REQUIRED**:
+  `logger.ts` only attaches the `pino-pretty` transport when NODE_ENV !==
+  "production". That transport runs in a worker thread whose path
+  (`thread-stream-worker.mjs`) is baked at BUILD time as the Actions runner's
+  absolute path (`/home/runner/work/ey-way/...`), which does not exist on Azure →
+  `MODULE_NOT_FOUND` at startup. In production pino logs plain JSON to stdout with
+  no worker, so forcing NODE_ENV=production avoids the worker entirely. Azure does
+  NOT set NODE_ENV by default for custom startup commands. Belt-and-suspenders:
+  also add `NODE_ENV=production` as an App Setting.
 - Recommend `SCM_DO_BUILD_DURING_DEPLOYMENT=false` since node_modules ships in the
   package (no Oryx rebuild needed).
-- `lib/db/src/index.ts` throws at import if `DATABASE_URL` is missing, so the
-  server will not boot until that app setting exists.
+- `lib/db/src/index.ts` throws at import only if NEITHER `DATABASE_URL` NOR the
+  required Azure split vars (`AZURE_POSTGRESQL_HOST/USER/PASSWORD/DATABASE`) are
+  set, so at least one DB form must exist before the server can boot.
 - The `training_sessions` table must be pushed to the Azure Postgres once
   (`drizzle-kit push` against the prod DATABASE_URL) — it won't exist there.
 
