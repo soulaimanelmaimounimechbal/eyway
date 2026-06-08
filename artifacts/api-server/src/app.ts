@@ -9,6 +9,7 @@ import {
   registerVoiceLiveTelemetryRoute,
   registerVoiceLiveTokenRoute,
 } from "./voice-live";
+import { registerSessionRoute } from "./sessions";
 
 const app: Express = express();
 
@@ -32,13 +33,16 @@ app.use(
   }),
 );
 app.use(cors());
-app.use(express.json());
+// 256kb comfortably exceeds the /api/sessions route ceiling (200kb) so the
+// route-level size check — not this middleware — owns the rejection path.
+app.use(express.json({ limit: "256kb" }));
 app.use(express.urlencoded({ extended: true }));
 
 registerVoiceLiveTokenRoute(app);
 registerVoiceLiveTelemetryRoute(app);
 registerVoiceLiveHealthRoute(app);
 registerVoiceLiveSmokeRoute(app);
+registerSessionRoute(app);
 app.use("/api", router);
 
 export default app;

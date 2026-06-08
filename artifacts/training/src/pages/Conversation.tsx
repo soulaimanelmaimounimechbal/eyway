@@ -40,7 +40,7 @@ export default function Conversation({
 }: {
   style: SocialStyle;
   intensity?: Intensity;
-  onDone: (transcript: TranscriptEntry[]) => void;
+  onDone: (transcript: TranscriptEntry[], durationMs: number) => void;
   onBack: () => void;
 }) {
   const agent = AGENTS[style];
@@ -199,7 +199,7 @@ export default function Conversation({
     emit("call_ended", { reason, turns, durationMs, persona: style });
     const c = clientRef.current;
     if (c) await c.stop();
-    onDoneRef.current(finalTranscript);
+    onDoneRef.current(finalTranscript, durationMs);
   }, [transcript, style]);
 
   // Surface the 30-second warning toast once.

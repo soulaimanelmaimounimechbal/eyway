@@ -1,0 +1,1 @@
+- [Composite TS project references](composite-ts-references.md) — after editing `lib/*` schema/exports, rebuild that lib's declarations (`tsc -b`) or dependent artifacts' typecheck fails with "no exported member".

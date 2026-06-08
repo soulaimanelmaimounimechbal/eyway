@@ -13,6 +13,7 @@ import Summary from "@/pages/Summary";
 import Debug from "@/pages/Debug";
 import { AGENTS, DEFAULT_INTENSITY, type Intensity, type SocialStyle } from "@/lib/agents";
 import { scoreTranscript, type TranscriptEntry } from "@/lib/voice-client";
+import { saveTrainingSession } from "@/lib/session-store";
 
 const queryClient = new QueryClient();
 
@@ -92,10 +93,22 @@ function App() {
             style={style}
             intensity={intensity}
             onBack={() => setStep("preflight")}
-            onDone={(transcript: TranscriptEntry[]) => {
+            onDone={(transcript: TranscriptEntry[], durationMs: number) => {
               const agent = AGENTS[style];
               const scored = scoreTranscript(transcript, style, agent.keywords);
               setResult({ ...scored, transcript });
+              saveTrainingSession({
+                style,
+                intensity,
+                selfReportedStyle: selfData.selfStyle || undefined,
+                selfNote: selfData.note || undefined,
+                tier: scored.tier,
+                userTurns: scored.userTurns,
+                avgWords: scored.avgWords,
+                hits: scored.hits,
+                durationMs,
+                transcript,
+              });
               setStep("outcome");
             }}
           />
