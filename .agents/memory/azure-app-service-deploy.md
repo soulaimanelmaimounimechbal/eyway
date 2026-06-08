@@ -29,11 +29,19 @@ serves the built frontend, and CI ships one self-contained package.
 - **Frontend build requires env**: `vite.config.ts` THROWS if `BASE_PATH` or
   `PORT` are unset even for `build`. CI sets `BASE_PATH=/ PORT=8080`.
 
-## Azure-side settings the user must configure (not in code)
-- App settings (env): `DATABASE_URL` (MUST end with `?sslmode=require` — Azure
-  Postgres requires TLS and the pg Pool passes no explicit ssl),
-  `AZURE_VOICE_LIVE_API_KEY`, `AZURE_VOICE_LIVE_ENDPOINT`. Do NOT set `PORT`
-  (Linux App Service injects it; the app reads `process.env.PORT`).
+## DB connection: two supported forms (see `lib/db/src/index.ts`)
+- `DATABASE_URL` (preferred; used in Replit). On Azure it MUST end with
+  `?sslmode=require` (TLS required; the pg Pool adds no ssl on this path).
+- OR Azure's auto-injected split settings: `AZURE_POSTGRESQL_HOST/PORT/USER/
+  PASSWORD/DATABASE/SSL`. `createPool()` falls back to these when `DATABASE_URL`
+  is absent, defaulting SSL on (`rejectUnauthorized:false`) unless
+  `AZURE_POSTGRESQL_SSL` is an explicit falsy/"disable" value. Either form works;
+  don't set both.
+
+## Other Azure-side settings the user must configure (not in code)
+- App settings (env): `AZURE_VOICE_LIVE_API_KEY`, `AZURE_VOICE_LIVE_ENDPOINT`,
+  plus one of the DB forms above. Do NOT set `PORT` (Linux App Service injects it;
+  the app reads `process.env.PORT`).
 - **Enable Web Sockets = On** (Configuration → General settings). Off by default;
   the voice feature uses a WS upgrade at `/api/voice-live` and will not work
   without it.
