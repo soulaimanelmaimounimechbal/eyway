@@ -1,3 +1,6 @@
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
@@ -44,5 +47,23 @@ registerVoiceLiveHealthRoute(app);
 registerVoiceLiveSmokeRoute(app);
 registerSessionRoute(app);
 app.use("/api", router);
+
+// Serve the built frontend (single-origin deployment, e.g. Azure App Service).
+// Only active when a `public` dir with an index.html sits next to the built
+// server bundle — so this is a no-op in Replit dev/prod, where the frontend is
+// served separately by the platform router.
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const publicDir = process.env["PUBLIC_DIR"] ?? path.resolve(moduleDir, "../public");
+if (fs.existsSync(path.join(publicDir, "index.html"))) {
+  logger.info({ publicDir }, "Serving frontend static assets");
+  app.use(express.static(publicDir));
+  // SPA fallback: any non-API GET/HEAD that didn't match a static file returns
+  // index.html so client-side routing works on refresh/deep-links.
+  app.use((req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") return next();
+    if (req.path.startsWith("/api")) return next();
+    res.sendFile(path.join(publicDir, "index.html"));
+  });
+}
 
 export default app;
