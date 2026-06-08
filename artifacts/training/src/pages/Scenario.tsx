@@ -7,7 +7,7 @@ export default function Scenario({ onNext, onBack }: { onNext: () => void; onBac
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col p-6 sm:p-10">
       <header className="flex items-center justify-between">
         <button onClick={onBack} className="text-sm text-muted-foreground hover-elevate rounded px-2 py-1" data-testid="button-back">← Back</button>
-        <ProgressDots step={1} total={8} label="Step 2 of 8" />
+        <ProgressDots step={1} total={7} label="Step 2 of 7" />
       </header>
 
       <main className="flex-1 py-10">
@@ -15,7 +15,11 @@ export default function Scenario({ onNext, onBack }: { onNext: () => void; onBac
           <Building2 className="h-3.5 w-3.5" /> Client brief
         </span>
         <h1 className="mt-4 text-3xl font-semibold sm:text-4xl">Glenara Travel Group</h1>
-        <p className="mt-2 text-muted-foreground">A last-minute call from a senior stakeholder. The room is tense.</p>
+        <p className="mt-2 text-muted-foreground">
+          You are now in a live conversation with one of the four clients from Glenara, you watched on
+          the videos in the classroom. Practice adapting your style.
+        </p>
+        <p className="mt-3 text-muted-foreground">A last-minute call from a senior stakeholder. The room is tense.</p>
 
         <div className="mt-8 space-y-5 rounded-2xl border bg-card p-6 shadow-sm">
           <Row icon={<Building2 className="h-4 w-4" />} label="Client">

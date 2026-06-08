@@ -365,7 +365,7 @@ export default function Conversation({
         >
           ← Back
         </button>
-        <ProgressDots step={4} total={8} label="Step 5 of 8" />
+        <ProgressDots step={4} total={7} label="Step 5 of 7" />
         <Button
           size="sm"
           variant="destructive"
@@ -389,7 +389,6 @@ export default function Conversation({
           <div className="flex-1">
             <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{agent.headline} client</div>
             <div className="text-lg font-semibold">{agent.name}</div>
-            <div className="text-sm text-muted-foreground">{agent.role}</div>
           </div>
           <div className="text-right">
             <div className="text-xs uppercase tracking-wider text-muted-foreground">Call time</div>

@@ -166,11 +166,11 @@ const NUDGE_TEXTS: Record<SocialStyle, { id: string; text: string }> = {
   },
   driving: {
     id: "driving:action",
-    text: "Alex wants action — name an owner and a date.",
+    text: "Dana wants action — name an owner and a date.",
   },
   expressive: {
     id: "expressive:story",
-    text: "Priya thinks in stories — give her a one-line narrative she can repeat.",
+    text: "Ravi thinks in stories — give him a one-line narrative he can repeat.",
   },
   amiable: {
     id: "amiable:people",
@@ -209,10 +209,10 @@ export const LIVE_STYLE_TIPS: Record<SocialStyle, string[]> = {
   driving: [
     "Open with the headline and the ask — not the context.",
     "Close every answer with a clear next step and an owner.",
-    "Cut hedging ('I think we could maybe…') — Alex hears it as drift.",
+    "Cut hedging ('I think we could maybe…') — Dana hears it as drift.",
   ],
   expressive: [
-    "Give Priya one sentence she can use in the room tomorrow.",
+    "Give Ravi one sentence he can use in the room tomorrow.",
     "Reach for a metaphor or analogy to make it stick.",
     "Tie it to people and momentum, not process.",
   ],
@@ -303,7 +303,7 @@ export function summarizeCall(
 export const TURN_SIGNAL_CLASSES: Record<TurnSignal, { dot: string; ring: string; label: string }> = {
   green: { dot: "bg-emerald-500", ring: "ring-emerald-500/40", label: "on-style" },
   amber: { dot: "bg-amber-500", ring: "ring-amber-500/40", label: "partial" },
-  grey: { dot: "bg-muted-foreground/50", ring: "ring-muted-foreground/30", label: "too short" },
+  grey: { dot: "bg-muted-foreground/50", ring: "ring-muted-foreground/30", label: "off style" },
 };
 
 /** Pair each completed user turn with the next assistant turn that follows it. */

@@ -23,7 +23,7 @@ export default function SelectClient({
     <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col p-6 sm:p-10">
       <header className="flex items-center justify-between">
         <button onClick={onBack} className="text-sm text-muted-foreground hover-elevate rounded px-2 py-1" data-testid="button-back">← Back</button>
-        <ProgressDots step={3} total={8} label="Step 4 of 8" />
+        <ProgressDots step={3} total={7} label="Step 4 of 7" />
       </header>
 
       <main className="flex-1 py-10">
@@ -47,11 +47,17 @@ export default function SelectClient({
                   active && "ring-2 ring-primary ring-offset-2 ring-offset-background",
                 )}
               >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{a.headline}</div>
-                    <h3 className="mt-1 text-xl font-semibold">{a.name}</h3>
-                    <div className="text-sm text-muted-foreground">{a.role}</div>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={a.avatar}
+                      alt={a.name}
+                      className="h-14 w-14 flex-none rounded-full border object-cover shadow-sm"
+                    />
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{a.headline}</div>
+                      <h3 className="mt-1 text-xl font-semibold">{a.name}</h3>
+                    </div>
                   </div>
                   <div className={cn(
                     "flex h-7 w-7 items-center justify-center rounded-full border text-xs",

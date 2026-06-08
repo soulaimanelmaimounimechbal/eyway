@@ -1,3 +1,8 @@
+import amiableAvatar from "@assets/Amiable_Social_Style_Avatar_Picture_1_1780910947775.png";
+import analyticalAvatar from "@assets/Analytical_Social_Style_Avatar_Picture_1_1780910947775.png";
+import drivingAvatar from "@assets/Driving_Social_Style_Agent_Picture_1_1780910947775.png";
+import expressiveAvatar from "@assets/Expressive_Social_Style_Avatar_Picture_1_1780910947776.png";
+
 export type SocialStyle = "analytical" | "driving" | "expressive" | "amiable";
 
 export type Intensity = "subtle" | "standard" | "extreme";
@@ -26,6 +31,7 @@ export interface AgentConfig {
   id: SocialStyle;
   name: string;
   role: string;
+  avatar: string;
   headline: string;
   bullets: string[];
   tone: string;
@@ -38,10 +44,16 @@ export interface AgentConfig {
   greeting: string;
 }
 
-const SHARED_FALLBACK_VOICES: string[] = [
+// Voices are grouped by gender so each persona's voice — and its fallbacks —
+// match the gender of the avatar photo shown on the selection card.
+const FEMALE_VOICES: string[] = [
   "en-US-Ava:DragonHDLatestNeural",
-  "en-US-Andrew:DragonHDLatestNeural",
+  "en-US-Emma:DragonHDLatestNeural",
   "en-US-Jenny:DragonHDLatestNeural",
+];
+const MALE_VOICES: string[] = [
+  "en-US-Andrew:DragonHDLatestNeural",
+  "en-US-Brian:DragonHDLatestNeural",
 ];
 
 const sharedContext = `
@@ -62,14 +74,15 @@ export const AGENTS: Record<SocialStyle, AgentConfig> = {
     id: "analytical",
     name: "Morgan Reeves",
     role: "Head of Sustainability Strategy",
+    avatar: analyticalAvatar,
     headline: "Analytical",
     bullets: [
       "Calm, structured, detail-oriented",
       "Focuses on accuracy and risk",
     ],
     tone: "Measured. Precise. Skeptical of hand-waving.",
-    voice: "en-US-Andrew:DragonHDLatestNeural",
-    fallbackVoices: SHARED_FALLBACK_VOICES.filter((v) => v !== "en-US-Andrew:DragonHDLatestNeural"),
+    voice: "en-US-Ava:DragonHDLatestNeural",
+    fallbackVoices: FEMALE_VOICES.filter((v) => v !== "en-US-Ava:DragonHDLatestNeural"),
     accent: "from-sky-500/15 to-sky-700/5 border-sky-600/30",
     keywords: ["data", "evidence", "assumption", "assumptions", "methodology", "source"],
     feedbackTip: "Use data, structure, and clarity.",
@@ -80,56 +93,59 @@ export const AGENTS: Record<SocialStyle, AgentConfig> = {
   },
   driving: {
     id: "driving",
-    name: "Alex Voss",
+    name: "Dana Voss",
     role: "Chief Operating Officer",
+    avatar: drivingAvatar,
     headline: "Driving",
     bullets: [
       "Direct, fast-paced, results-focused",
       "Wants decisions and action",
     ],
     tone: "Direct. Impatient. Bottom-line oriented.",
-    voice: "en-US-Brian:DragonHDLatestNeural",
-    fallbackVoices: SHARED_FALLBACK_VOICES.filter((v) => v !== "en-US-Brian:DragonHDLatestNeural"),
+    voice: "en-US-Emma:DragonHDLatestNeural",
+    fallbackVoices: FEMALE_VOICES.filter((v) => v !== "en-US-Emma:DragonHDLatestNeural"),
     accent: "from-rose-500/15 to-rose-700/5 border-rose-600/30",
     keywords: ["plan", "next step", "next steps", "timeline", "decision", "action", "by when"],
     feedbackTip: "Be concise and action-oriented.",
     greeting:
       "I've got fifteen minutes. The report blew up internally and I'm in front of the board tomorrow. What's the plan? Give me the headline and what you need from me.",
     instructions:
-      `${sharedContext}\n\nCharacter: Alex Voss, COO. DRIVING style.\n- Fast-paced, direct, and impatient. Short sentences. No fluff.\n- You interrupt long-winded answers with things like "Get to it." or "What's the plan?" or "Bottom line?".\n- You want decisions, owners, and timelines. You push for next steps.\n- You get visibly frustrated when the consultant rambles, explains background instead of action, or hedges.\n- You are reassured by a clear plan with owners and dates, and a confident recommendation.\n- Speak crisply, briskly, and with authority.`,
+      `${sharedContext}\n\nCharacter: Dana Voss, COO. DRIVING style.\n- Fast-paced, direct, and impatient. Short sentences. No fluff.\n- You interrupt long-winded answers with things like "Get to it." or "What's the plan?" or "Bottom line?".\n- You want decisions, owners, and timelines. You push for next steps.\n- You get visibly frustrated when the consultant rambles, explains background instead of action, or hedges.\n- You are reassured by a clear plan with owners and dates, and a confident recommendation.\n- Speak crisply, briskly, and with authority.`,
   },
   expressive: {
     id: "expressive",
-    name: "Priya Shah",
+    name: "Ravi Shah",
     role: "VP Brand & Communications",
+    avatar: expressiveAvatar,
     headline: "Expressive",
     bullets: [
       "Energetic, big-picture",
       "Wants clear story and momentum",
     ],
     tone: "Warm, energetic, storytelling.",
-    voice: "en-US-Ava:DragonHDLatestNeural",
-    fallbackVoices: SHARED_FALLBACK_VOICES.filter((v) => v !== "en-US-Ava:DragonHDLatestNeural"),
+    voice: "en-US-Andrew:DragonHDLatestNeural",
+    fallbackVoices: MALE_VOICES.filter((v) => v !== "en-US-Andrew:DragonHDLatestNeural"),
     accent: "from-amber-500/15 to-amber-700/5 border-amber-600/30",
     keywords: ["story", "narrative", "confidence", "message", "vision", "people"],
     feedbackTip: "Focus on narrative and energy.",
     greeting:
       "Okay, talk to me — what's the story here? I need something I can actually say tomorrow that lands. Right now it just feels like a mess and I want to know how we turn this into a moment.",
     instructions:
-      `${sharedContext}\n\nCharacter: Priya Shah, VP Brand & Communications. EXPRESSIVE style.\n- Warm, energetic, big-picture. You speak in stories and metaphors.\n- You ask for "the story", "the narrative", "the message", how it will "land".\n- You get visibly bored or disengaged when answers are dry, technical, or numbers-only ("okay but what does that mean for the room?", "you're losing me").\n- You light up when the consultant frames things as a clear narrative with confidence and momentum.\n- Speak with energy, warmth, and rhythm. Use natural emphasis.`,
+      `${sharedContext}\n\nCharacter: Ravi Shah, VP Brand & Communications. EXPRESSIVE style.\n- Warm, energetic, big-picture. You speak in stories and metaphors.\n- You ask for "the story", "the narrative", "the message", how it will "land".\n- You get visibly bored or disengaged when answers are dry, technical, or numbers-only ("okay but what does that mean for the room?", "you're losing me").\n- You light up when the consultant frames things as a clear narrative with confidence and momentum.\n- Speak with energy, warmth, and rhythm. Use natural emphasis.`,
   },
   amiable: {
     id: "amiable",
     name: "Jordan Lee",
     role: "Head of People & Culture",
+    avatar: amiableAvatar,
     headline: "Amiable",
     bullets: [
       "Warm, relationship-focused",
       "Wants trust and reassurance",
     ],
     tone: "Gentle, concerned, relational.",
-    voice: "en-US-Emma:DragonHDLatestNeural",
-    fallbackVoices: SHARED_FALLBACK_VOICES,
+    voice: "en-US-Brian:DragonHDLatestNeural",
+    fallbackVoices: MALE_VOICES.filter((v) => v !== "en-US-Brian:DragonHDLatestNeural"),
     accent: "from-emerald-500/15 to-emerald-700/5 border-emerald-600/30",
     keywords: ["team", "support", "trust", "together", "people", "we"],
     feedbackTip: "Show empathy and build trust.",

@@ -202,14 +202,13 @@ export default function Preflight({
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col p-6 sm:p-10">
       <header className="flex items-center justify-between">
         <button onClick={onBack} className="text-sm text-muted-foreground hover-elevate rounded px-2 py-1" data-testid="button-back">← Back</button>
-        <ProgressDots step={4} total={8} label="Step 5 of 8 · Pre-flight" />
+        <ProgressDots step={4} total={7} label="Step 5 of 7 · Pre-flight" />
       </header>
 
       <main className="flex-1 py-8">
         <div className={cn("rounded-2xl border bg-gradient-to-br p-5 shadow-sm", agent.accent)}>
           <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{agent.headline} client</div>
           <div className="mt-1 text-xl font-semibold">{agent.name}</div>
-          <div className="text-sm text-muted-foreground">{agent.role}</div>
         </div>
 
         <h1 className="mt-8 text-2xl font-semibold sm:text-3xl">Quick pre-flight check</h1>

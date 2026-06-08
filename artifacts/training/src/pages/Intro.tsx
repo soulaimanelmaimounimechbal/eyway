@@ -10,7 +10,7 @@ export default function Intro({ onNext }: { onNext: () => void }) {
           <div className="h-6 w-6 rounded bg-primary" />
           <span className="text-sm font-semibold tracking-wide">EY · Social Styles Lab</span>
         </div>
-        <ProgressDots step={0} total={8} label="Step 1 of 8" />
+        <ProgressDots step={0} total={7} label="Step 1 of 7" />
       </header>
 
       <main className="flex flex-1 flex-col justify-center gap-8 py-10">
@@ -19,7 +19,7 @@ export default function Intro({ onNext }: { onNext: () => void }) {
             <Sparkles className="h-3.5 w-3.5" /> Voice simulation
           </span>
           <h1 className="text-4xl font-semibold leading-tight sm:text-5xl">
-            Practice handling difficult client conversations — out loud.
+            Adapting your style in client conversations
           </h1>
           <p className="max-w-2xl text-lg text-muted-foreground">
             You'll walk into a high-stakes meeting with one of four client personalities, each

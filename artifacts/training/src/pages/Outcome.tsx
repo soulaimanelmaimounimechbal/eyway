@@ -76,7 +76,7 @@ export default function Outcome({
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col p-6 sm:p-10">
       <header className="flex items-center justify-between">
         <div />
-        <ProgressDots step={5} total={8} label="Step 6 of 8" />
+        <ProgressDots step={5} total={7} label="Step 6 of 7" />
       </header>
 
       <main className="flex flex-1 flex-col gap-6 py-8">
@@ -93,7 +93,7 @@ export default function Outcome({
           <Stat label="Your turns" value={String(userTurns)} />
           <Stat label="On-style" value={String(summary.greenTurns)} tone="green" />
           <Stat label="Partial" value={String(summary.amberTurns)} tone="amber" />
-          <Stat label="Too short" value={String(summary.greyTurns)} tone="grey" />
+          <Stat label="Off style" value={String(summary.greyTurns)} tone="grey" />
         </div>
 
         <section className="rounded-2xl border bg-card p-5 shadow-sm">
@@ -207,7 +207,7 @@ export default function Outcome({
           <Users className="h-4 w-4" /> Try a different style
         </Button>
         <Button size="lg" onClick={onNext} data-testid="button-continue" className="gap-2">
-          Reflect on it <ArrowRight className="h-4 w-4" />
+          See tips <ArrowRight className="h-4 w-4" />
         </Button>
       </footer>
     </div>

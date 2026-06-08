@@ -28,7 +28,7 @@ export default function SelfReflection({
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col p-6 sm:p-10">
       <header className="flex items-center justify-between">
         <button onClick={onBack} className="text-sm text-muted-foreground hover-elevate rounded px-2 py-1" data-testid="button-back">← Back</button>
-        <ProgressDots step={2} total={8} label="Step 3 of 8" />
+        <ProgressDots step={2} total={7} label="Step 3 of 7" />
       </header>
 
       <main className="flex-1 py-10">

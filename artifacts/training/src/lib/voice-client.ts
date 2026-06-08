@@ -462,6 +462,14 @@ export class VoiceClient {
   private pushTranscript(role: "user" | "assistant", text: string) {
     const t = text.trim();
     if (!t) return;
+    // Drop noise-only user utterances (e.g. a stray "T." the recognizer emits
+    // when it catches a single sound). We keep anything with at least two
+    // alphanumeric characters so short-but-real answers like "No"/"Yes"/"Ok"
+    // still register as turns. Assistant text is never filtered.
+    if (role === "user") {
+      const alnum = t.replace(/[^a-z0-9]/gi, "");
+      if (alnum.length < 2) return;
+    }
     // Avoid duplicating the optimistic greeting line.
     const last = this.transcript[this.transcript.length - 1];
     if (last && last.role === role && last.done && last.text.trim() === t) return;

@@ -9,7 +9,6 @@ import SelectClient from "@/pages/SelectClient";
 import Preflight from "@/pages/Preflight";
 import Conversation from "@/pages/Conversation";
 import Outcome, { type Tier } from "@/pages/Outcome";
-import Reflection, { type ReflectionData } from "@/pages/Reflection";
 import Summary from "@/pages/Summary";
 import Debug from "@/pages/Debug";
 import { AGENTS, DEFAULT_INTENSITY, type Intensity, type SocialStyle } from "@/lib/agents";
@@ -25,7 +24,6 @@ type Step =
   | "preflight"
   | "conversation"
   | "outcome"
-  | "reflection"
   | "summary";
 
 interface SessionResult {
@@ -42,7 +40,6 @@ function App() {
     && new URLSearchParams(window.location.search).get("debug") === "1";
   const [step, setStep] = useState<Step>("intro");
   const [selfData, setSelfData] = useState<SelfReflectionData>({ selfStyle: "", note: "" });
-  const [reflectData, setReflectData] = useState<ReflectionData>({ worked: "", next: "", hardestStyle: "" });
   const [style, setStyle] = useState<SocialStyle | null>(null);
   const [intensity, setIntensity] = useState<Intensity>(DEFAULT_INTENSITY);
   const [result, setResult] = useState<SessionResult | null>(null);
@@ -112,17 +109,9 @@ function App() {
             hits={result.hits}
             userTurns={result.userTurns}
             transcript={result.transcript}
-            onNext={() => setStep("reflection")}
+            onNext={() => setStep("summary")}
             onTrySame={() => { setResult(null); setStep("preflight"); }}
             onTryDifferent={() => { setResult(null); setStyle(null); setStep("select"); }}
-          />
-        );
-      case "reflection":
-        return (
-          <Reflection
-            initial={reflectData}
-            onBack={() => setStep("outcome")}
-            onNext={(d) => { setReflectData(d); setStep("summary"); }}
           />
         );
       case "summary":
@@ -134,13 +123,12 @@ function App() {
             onRestart={() => {
               setStyle(null);
               setResult(null);
-              setReflectData({ worked: "", next: "", hardestStyle: "" });
               setStep("select");
             }}
           />
         );
     }
-  }, [step, selfData, reflectData, style, intensity, result]);
+  }, [step, selfData, style, intensity, result]);
 
   return (
     <QueryClientProvider client={queryClient}>
