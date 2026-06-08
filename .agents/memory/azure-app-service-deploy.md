@@ -17,10 +17,15 @@ serves the built frontend, and CI ships one self-contained package.
   `@azure/ai-voicelive` fails at runtime with `ERR_MODULE_NOT_FOUND` — the voice
   SDK does not bundle. So the runtime needs a real `node_modules` with
   `@azure/ai-voicelive` + `@azure/core-auth`.
-- **`pnpm deploy` needs `--prod --legacy`** (pnpm v10 refuses non-injected
-  workspace deploys by default). `pnpm --filter @workspace/api-server --prod
-  --legacy deploy <out>` yields a folder with built `dist/` + a flat
-  `node_modules` containing the externalized deps. Then copy
+- **`pnpm deploy` needs `--prod --legacy --node-linker=hoisted`**. `--legacy` is
+  required because pnpm v10 refuses non-injected workspace deploys by default.
+  `--node-linker=hoisted` is REQUIRED too: pnpm's default isolated layout makes
+  top-level packages **symlinks into `.pnpm/`**, and Azure's zip deploy does NOT
+  preserve symlinks — so externalized deps like `@azure/ai-voicelive` vanish at
+  runtime with `ERR_MODULE_NOT_FOUND` even though they were "installed". Hoisted
+  produces real directories that survive the upload. `pnpm --filter
+  @workspace/api-server --prod --legacy --node-linker=hoisted deploy <out>`
+  yields built `dist/` + a real (non-symlinked) `node_modules`. Then copy
   `artifacts/training/dist/public` → `<out>/public`.
 - **api-server serves frontend** only when a `public/` with `index.html` sits next
   to `dist/index.mjs` (gated by `fs.existsSync`), so it's a no-op in Replit

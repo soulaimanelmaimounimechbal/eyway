@@ -53,7 +53,10 @@ jobs:
           rm -rf deploy
           # Produces ./deploy with the built server bundle + a flat node_modules
           # containing the runtime deps that aren't bundled (e.g. @azure/*).
-          pnpm --filter @workspace/api-server --prod --legacy deploy deploy
+          # node-linker=hoisted is REQUIRED: pnpm's default symlinked layout does
+          # not survive Azure's zip deploy, so externalized packages like
+          # @azure/ai-voicelive would fail at runtime (ERR_MODULE_NOT_FOUND).
+          pnpm --filter @workspace/api-server --prod --legacy --node-linker=hoisted deploy deploy
           # Co-locate the built frontend so the server serves it from /public.
           cp -r artifacts/training/dist/public deploy/public
 
