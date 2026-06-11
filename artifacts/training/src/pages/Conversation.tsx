@@ -233,9 +233,12 @@ export default function Conversation({
     // time the Replit preview iframe lost focus.
     let spaceEngaged = false;
     const onDown = (e: KeyboardEvent) => {
-      if (e.code !== "Space" || e.repeat) return;
+      if (e.code !== "Space") return;
       if (isTypingTarget(e.target)) return;
+      // Always stop the page from scrolling on Space — including the
+      // auto-repeat keydowns the OS fires while the key is held down.
       e.preventDefault();
+      if (e.repeat) return;
       spaceEngaged = true;
       engageMic();
     };
