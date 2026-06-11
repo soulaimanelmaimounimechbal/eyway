@@ -1,1 +1,2 @@
 - [Azure App Service single-app deploy](azure-app-service-deploy.md) — full app on one Web App: keep @azure external, `pnpm deploy --prod --legacy`, api-server serves frontend/public, enable WebSockets, sslmode=require.
+- [Azure OpenAI/Foundry endpoint shapes](azure-openai-foundry-endpoint.md) — Foundry (services.ai.azure.com) uses v1 path + model in body; classic uses deployments path + api-version; always reduce pasted endpoint to origin.

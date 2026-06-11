@@ -39,18 +39,54 @@ function isSameOrigin(req: Request): boolean {
   }
 }
 
-// Resolve the Azure OpenAI chat config. Prefer dedicated AZURE_OPENAI_* vars,
-// but fall back to the existing Azure Voice Live credentials so a single Azure
-// resource that also hosts a chat deployment works without extra setup.
-function azureConfig(): { endpoint: string; apiKey: string; deployment: string; apiVersion: string } | null {
+type AzureConfig = {
+  endpoint: string;
+  apiKey: string;
+  deployment: string;
+  apiVersion: string;
+  // Azure AI Foundry resources (*.services.ai.azure.com) speak the
+  // OpenAI-compatible v1 API: POST /openai/v1/chat/completions with the model
+  // in the request body and no api-version query param. Classic Azure OpenAI
+  // resources (*.cognitiveservices.azure.com) use the deployments path instead.
+  useV1: boolean;
+};
+
+function safeOrigin(raw: string): string | null {
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return null;
+  }
+}
+
+// Resolve the Azure OpenAI chat config. Prefer a dedicated AZURE_OPENAI_*
+// resource; otherwise fall back to the existing Azure Voice Live credentials so
+// a single Azure resource that also hosts a chat deployment works without extra
+// setup. Endpoints may be pasted as a full path (e.g. the Foundry ".../openai/
+// v1/responses" URL); we always reduce them to their origin and rebuild the path.
+function azureConfig(): AzureConfig | null {
   const n = process.env;
-  const endpoint = n["AZURE_OPENAI_ENDPOINT"] ?? n["AZURE_VOICE_LIVE_ENDPOINT"];
-  const apiKey = n["AZURE_OPENAI_API_KEY"] ?? n["AZURE_VOICE_LIVE_API_KEY"];
-  const deployment = n["AZURE_OPENAI_DEPLOYMENT"] ?? n["AZURE_VOICE_LIVE_MODEL"] ?? "gpt-4o";
-  // Chat completions uses a GA api-version distinct from the realtime one.
   const apiVersion = n["AZURE_OPENAI_API_VERSION"] ?? "2024-10-21";
+
+  const dedicatedEndpoint = n["AZURE_OPENAI_ENDPOINT"];
+  const dedicatedKey = n["AZURE_OPENAI_API_KEY"];
+  if (dedicatedEndpoint && dedicatedKey) {
+    const origin = safeOrigin(dedicatedEndpoint);
+    if (!origin) return null;
+    const useV1 =
+      /\.services\.ai\.azure\.com$/i.test(new URL(origin).host) ||
+      /\/openai\/v1\//i.test(dedicatedEndpoint);
+    // Don't borrow the realtime AZURE_VOICE_LIVE_MODEL here — the dedicated chat
+    // resource may not host that deployment. gpt-4o-mini is the common default.
+    const deployment = n["AZURE_OPENAI_DEPLOYMENT"] ?? "gpt-4o-mini";
+    return { endpoint: origin, apiKey: dedicatedKey, deployment, apiVersion, useV1 };
+  }
+
+  const endpoint = n["AZURE_VOICE_LIVE_ENDPOINT"];
+  const apiKey = n["AZURE_VOICE_LIVE_API_KEY"];
   if (!endpoint || !apiKey) return null;
-  return { endpoint: endpoint.replace(/\/+$/, ""), apiKey, deployment, apiVersion };
+  const deployment = n["AZURE_VOICE_LIVE_MODEL"] ?? "gpt-4o";
+  return { endpoint: endpoint.replace(/\/+$/, ""), apiKey, deployment, apiVersion, useV1: false };
 }
 
 // Per-style success criteria — what "adapting to this Social Style" looks like.
@@ -160,7 +196,9 @@ async function callAzure(
   system: string,
   user: string,
 ): Promise<string> {
-  const url = `${cfg.endpoint}/openai/deployments/${encodeURIComponent(cfg.deployment)}/chat/completions?api-version=${encodeURIComponent(cfg.apiVersion)}`;
+  const url = cfg.useV1
+    ? `${cfg.endpoint}/openai/v1/chat/completions`
+    : `${cfg.endpoint}/openai/deployments/${encodeURIComponent(cfg.deployment)}/chat/completions?api-version=${encodeURIComponent(cfg.apiVersion)}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), AZURE_TIMEOUT_MS);
   try {
@@ -168,6 +206,9 @@ async function callAzure(
       method: "POST",
       headers: { "api-key": cfg.apiKey, "content-type": "application/json" },
       body: JSON.stringify({
+        // The v1 API selects the deployment via the model field; the classic
+        // deployments path encodes it in the URL instead.
+        ...(cfg.useV1 ? { model: cfg.deployment } : {}),
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },
