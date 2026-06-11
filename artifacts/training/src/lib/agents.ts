@@ -66,7 +66,7 @@ If the consultant gives short, vague, or unhelpful answers, react in character (
 export const AGENTS: Record<SocialStyle, AgentConfig> = {
   analytical: {
     id: "analytical",
-    name: "Morgan Reeves",
+    name: "Emily Reeves",
     role: "Head of Sustainability Strategy",
     avatar: analyticalAvatar,
     headline: "Analytical",
@@ -83,7 +83,7 @@ export const AGENTS: Record<SocialStyle, AgentConfig> = {
     greeting:
       "Thanks for jumping on. Before we go anywhere, I want to understand exactly what in the report has caused this reaction. Can you walk me through where the confusion is and what the underlying numbers actually say?",
     instructions:
-      `${sharedContext}\n\nCharacter: Morgan Reeves, Head of Sustainability Strategy. ANALYTICAL style.\n- Calm, measured, and precise. You ask questions and dig into specifics.\n- You request evidence, sources, methodology, and assumptions.\n- You push back politely on vague or generalized answers ("can you be more specific?", "what's the data behind that?").\n- You do not get emotional, but you do get more clipped and skeptical when answers are sloppy.\n- You are reassured by clear structure, named sources, and an honest acknowledgement of what you do and do not know.\n- Speak in a calm, even, slightly serious tone.`,
+      `${sharedContext}\n\nCharacter: Emily Reeves, Head of Sustainability Strategy. ANALYTICAL style.\n- Calm, measured, and precise. You ask questions and dig into specifics.\n- You request evidence, sources, methodology, and assumptions.\n- You push back politely on vague or generalized answers ("can you be more specific?", "what's the data behind that?").\n- You do not get emotional, but you do get more clipped and skeptical when answers are sloppy.\n- You are reassured by clear structure, named sources, and an honest acknowledgement of what you do and do not know.\n- Speak in a calm, even, slightly serious tone.`,
   },
   driving: {
     id: "driving",
@@ -150,4 +150,12 @@ export const AGENTS: Record<SocialStyle, AgentConfig> = {
   },
 };
 
-export const AGENT_LIST = Object.values(AGENTS);
+// Explicit order so the on-screen "Client A/B/C/D" labels (assigned by position
+// in SelectClient) match the intro video: A = Expressive, B = Analytical,
+// C = Amiable, D = Driving.
+export const AGENT_LIST = [
+  AGENTS.expressive,
+  AGENTS.analytical,
+  AGENTS.amiable,
+  AGENTS.driving,
+];

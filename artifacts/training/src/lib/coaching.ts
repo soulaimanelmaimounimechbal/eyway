@@ -160,7 +160,7 @@ export function reconcileWithTier(
 export const LIVE_STYLE_TIPS: Record<SocialStyle, string[]> = {
   analytical: [
     "Lead with the number, then the inference.",
-    "Name your assumptions so Morgan can audit them.",
+    "Name your assumptions so Emily can audit them.",
     "When you don't know, say 'I don't have that yet — I'll come back with the source.'",
   ],
   driving: [

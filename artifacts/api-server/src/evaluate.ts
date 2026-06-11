@@ -92,7 +92,7 @@ function azureConfig(): AzureConfig | null {
 // Per-style success criteria — what "adapting to this Social Style" looks like.
 const STYLE_RUBRIC: Record<Style, string> = {
   analytical:
-    "ANALYTICAL (Morgan Reeves, Head of Sustainability Strategy). Adapting well means: grounding claims in data, evidence, methodology and named sources; being precise and structured; stating assumptions; honestly acknowledging what is and isn't known. Off-style: vague generalities, hand-waving, confident claims with no specifics, emotional appeals without substance.",
+    "ANALYTICAL (Emily Reeves, Head of Sustainability Strategy). Adapting well means: grounding claims in data, evidence, methodology and named sources; being precise and structured; stating assumptions; honestly acknowledging what is and isn't known. Off-style: vague generalities, hand-waving, confident claims with no specifics, emotional appeals without substance.",
   driving:
     "DRIVING (Dana Voss, COO). Adapting well means: leading with the headline and the ask; being concise and direct; offering a clear recommendation, decision, owners and timelines; closing with concrete next steps. Off-style: rambling, giving background before the point, hedging ('I think maybe we could'), no clear action.",
   expressive:
