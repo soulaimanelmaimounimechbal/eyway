@@ -10,7 +10,9 @@ import {
   pairTurns,
   summarizeCall,
   TURN_SIGNAL_CLASSES,
+  type TurnSignal,
 } from "@/lib/coaching";
+import type { AiAssessment, AiSuggestion } from "@/lib/assessment";
 
 export type Tier = "green" | "amber" | "red";
 
@@ -40,12 +42,18 @@ const TIER_VISUALS: Record<Tier, {
   },
 };
 
+interface TurnView {
+  signal: TurnSignal;
+  note?: string;
+}
+
 export default function Outcome({
   style,
   tier,
   hits,
   userTurns,
   transcript,
+  assessment,
   onNext,
   onTrySame,
   onTryDifferent,
@@ -55,22 +63,50 @@ export default function Outcome({
   hits: string[];
   userTurns: number;
   transcript: TranscriptEntry[];
+  assessment?: AiAssessment;
   onNext: () => void;
   onTrySame: () => void;
   onTryDifferent: () => void;
 }) {
   const agent = AGENTS[style];
   const visual = TIER_VISUALS[tier];
+  const isAi = !!assessment;
 
   const pairs = useMemo(() => pairTurns(transcript), [transcript]);
-  // Per-turn signals are reconciled against the canonical tier so the
-  // breakdown can never contradict the headline (e.g. all-green dots under
-  // an amber tier is impossible).
+
+  // Per-turn views, suggestions and headline blurb come from the AI assessment
+  // when present; otherwise from the deterministic scorer. Per-turn signals in
+  // the deterministic path are reconciled against the canonical tier so the
+  // breakdown can never contradict the headline.
   const reconciledEvals = useMemo(
     () => evaluateAllTurns(transcript, agent, tier),
     [transcript, agent, tier],
   );
   const summary = useMemo(() => summarizeCall(transcript, agent, tier), [transcript, agent, tier]);
+
+  const turnViews: TurnView[] = useMemo(() => {
+    if (assessment) {
+      return pairs.map((_, idx) => {
+        const t = assessment.turns[idx];
+        return { signal: t?.signal ?? "grey", note: t?.reason };
+      });
+    }
+    return reconciledEvals.map((e) => ({ signal: e.signal, note: e.note }));
+  }, [assessment, pairs, reconciledEvals]);
+
+  const counts = useMemo(() => {
+    let green = 0, amber = 0, grey = 0;
+    for (const t of turnViews) {
+      if (t.signal === "green") green++;
+      else if (t.signal === "amber") amber++;
+      else grey++;
+    }
+    return { green, amber, grey };
+  }, [turnViews]);
+
+  const blurb = assessment?.overall ?? visual.blurb(agent.name);
+  const suggestions: AiSuggestion[] = assessment?.suggestions ?? summary.suggestions;
+  const strengths = assessment?.strengths ?? [];
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col p-6 sm:p-10">
@@ -85,15 +121,15 @@ export default function Outcome({
           <div>
             <div className="text-xs font-semibold uppercase tracking-wider">Outcome</div>
             <h1 className="mt-1 text-2xl font-semibold">{visual.title}</h1>
-            <p className="mt-2 text-base text-foreground/80">{visual.blurb(agent.name)}</p>
+            <p className="mt-2 text-base text-foreground/80">{blurb}</p>
           </div>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-4">
           <Stat label="Your turns" value={String(userTurns)} />
-          <Stat label="On-style" value={String(summary.greenTurns)} tone="green" />
-          <Stat label="Partial" value={String(summary.amberTurns)} tone="amber" />
-          <Stat label="Off style" value={String(summary.greyTurns)} tone="grey" />
+          <Stat label="On-style" value={String(counts.green)} tone="green" />
+          <Stat label="Partial" value={String(counts.amber)} tone="amber" />
+          <Stat label="Off style" value={String(counts.grey)} tone="grey" />
         </div>
 
         <section className="rounded-2xl border bg-card p-5 shadow-sm">
@@ -108,7 +144,7 @@ export default function Outcome({
           ) : (
             <ol className="space-y-4" data-testid="turn-breakdown">
               {pairs.map((p, idx) => {
-                const ev = reconciledEvals[idx];
+                const ev = turnViews[idx];
                 if (!ev) return null;
                 const cls = TURN_SIGNAL_CLASSES[ev.signal];
                 return (
@@ -140,10 +176,24 @@ export default function Outcome({
           )}
         </section>
 
+        {strengths.length > 0 && (
+          <section className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5 shadow-sm">
+            <h2 className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">What worked</h2>
+            <ul className="mt-3 space-y-2" data-testid="strengths-list">
+              {strengths.map((s, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm" data-testid={`strength-${i}`}>
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span className="leading-snug">{s}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         <section className="rounded-2xl border border-primary/30 bg-primary/5 p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-primary">Try next time</h2>
           <ul className="mt-3 space-y-3" data-testid="suggestions-list">
-            {summary.suggestions.map((s, i) => (
+            {suggestions.map((s, i) => (
               <li key={i} className="flex items-start gap-2 text-sm" data-testid={`suggestion-${i}`}>
                 <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
                   {i + 1}
@@ -164,27 +214,29 @@ export default function Outcome({
           </ul>
         </section>
 
-        <section className="rounded-2xl border bg-card p-5 shadow-sm">
-          <div className="text-xs uppercase tracking-wider text-muted-foreground">Cues we listened for</div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {agent.keywords.map((k) => {
-              const hit = hits.includes(k);
-              return (
-                <span
-                  key={k}
-                  className={cn(
-                    "rounded-full border px-3 py-1 text-xs",
-                    hit ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                        : "border-border bg-muted text-muted-foreground",
-                  )}
-                  data-testid={`chip-keyword-${k}`}
-                >
-                  {hit ? "✓ " : ""}{k}
-                </span>
-              );
-            })}
-          </div>
-        </section>
+        {!isAi && (
+          <section className="rounded-2xl border bg-card p-5 shadow-sm">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground">Cues we listened for</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {agent.keywords.map((k) => {
+                const hit = hits.includes(k);
+                return (
+                  <span
+                    key={k}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-xs",
+                      hit ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                          : "border-border bg-muted text-muted-foreground",
+                    )}
+                    data-testid={`chip-keyword-${k}`}
+                  >
+                    {hit ? "✓ " : ""}{k}
+                  </span>
+                );
+              })}
+            </div>
+          </section>
+        )}
       </main>
 
       <footer className="flex flex-wrap items-center justify-end gap-3 pt-6">

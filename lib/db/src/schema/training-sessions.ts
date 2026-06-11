@@ -33,6 +33,16 @@ export const trainingSessionsTable = pgTable("training_sessions", {
     .$type<{ role: "user" | "assistant"; text: string; done: boolean }[]>()
     .notNull()
     .default([]),
+
+  // AI assessment of the call (TRACOM Social Styles), when the LLM evaluation
+  // engine succeeded. Null when we fell back to the deterministic scorer.
+  assessment: jsonb("assessment").$type<{
+    tier: string;
+    overall: string;
+    strengths: string[];
+    suggestions: { text: string; quotedLine?: string }[];
+    turns: { signal: string; reason: string; quote?: string }[];
+  } | null>(),
 });
 
 export const insertTrainingSessionSchema = createInsertSchema(trainingSessionsTable).omit({

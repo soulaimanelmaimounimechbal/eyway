@@ -7,11 +7,13 @@ import Scenario from "@/pages/Scenario";
 import SelectClient from "@/pages/SelectClient";
 import Preflight from "@/pages/Preflight";
 import Conversation from "@/pages/Conversation";
+import Analyzing from "@/pages/Analyzing";
 import Outcome, { type Tier } from "@/pages/Outcome";
 import Summary from "@/pages/Summary";
 import Debug from "@/pages/Debug";
 import { AGENTS, DEFAULT_INTENSITY, type Intensity, type SocialStyle } from "@/lib/agents";
 import { scoreTranscript, type TranscriptEntry } from "@/lib/voice-client";
+import { evaluateConversation, type AiAssessment } from "@/lib/assessment";
 import { saveTrainingSession } from "@/lib/session-store";
 
 const queryClient = new QueryClient();
@@ -22,6 +24,7 @@ type Step =
   | "select"
   | "preflight"
   | "conversation"
+  | "analyzing"
   | "outcome"
   | "summary";
 
@@ -30,6 +33,7 @@ interface SessionResult {
   hits: string[];
   userTurns: number;
   transcript: TranscriptEntry[];
+  assessment?: AiAssessment;
 }
 
 function App() {
@@ -45,7 +49,9 @@ function App() {
   // Guard: if we land on a step that requires state we don't have, navigate
   // back to the right place via effect (not during render).
   useEffect(() => {
-    if ((step === "conversation" || step === "preflight") && !style) setStep("select");
+    if ((step === "conversation" || step === "preflight" || step === "analyzing") && !style) {
+      setStep("select");
+    }
     if ((step === "outcome" || step === "summary") && (!style || !result)) setStep("select");
   }, [step, style, result]);
 
@@ -83,21 +89,44 @@ function App() {
             onDone={(transcript: TranscriptEntry[], durationMs: number) => {
               const agent = AGENTS[style];
               const scored = scoreTranscript(transcript, style, agent.keywords);
-              setResult({ ...scored, transcript });
-              saveTrainingSession({
-                style,
-                intensity,
-                tier: scored.tier,
-                userTurns: scored.userTurns,
-                avgWords: scored.avgWords,
-                hits: scored.hits,
-                durationMs,
-                transcript,
-              });
-              setStep("outcome");
+              // Show the analyzing screen while the LLM evaluates the call.
+              setStep("analyzing");
+              void (async () => {
+                let assessment: AiAssessment | null = null;
+                try {
+                  assessment = await evaluateConversation({ style, intensity, transcript });
+                } catch {
+                  assessment = null;
+                }
+                // AI tier wins when available; otherwise fall back to the
+                // deterministic scorer's tier.
+                const tier = assessment?.tier ?? scored.tier;
+                setResult({
+                  tier,
+                  hits: scored.hits,
+                  userTurns: scored.userTurns,
+                  transcript,
+                  assessment: assessment ?? undefined,
+                });
+                saveTrainingSession({
+                  style,
+                  intensity,
+                  tier,
+                  userTurns: scored.userTurns,
+                  avgWords: scored.avgWords,
+                  hits: scored.hits,
+                  durationMs,
+                  transcript,
+                  assessment,
+                });
+                setStep("outcome");
+              })();
             }}
           />
         );
+      case "analyzing":
+        if (!style) return null;
+        return <Analyzing style={style} />;
       case "outcome":
         if (!style || !result) return null;
         return (
@@ -107,6 +136,7 @@ function App() {
             hits={result.hits}
             userTurns={result.userTurns}
             transcript={result.transcript}
+            assessment={result.assessment}
             onNext={() => setStep("summary")}
             onTrySame={() => { setResult(null); setStep("preflight"); }}
             onTryDifferent={() => { setResult(null); setStyle(null); setStep("select"); }}

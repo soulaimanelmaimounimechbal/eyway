@@ -13,6 +13,7 @@ import {
   registerVoiceLiveTokenRoute,
 } from "./voice-live";
 import { registerSessionRoute } from "./sessions";
+import { registerEvaluateRoute } from "./evaluate";
 
 const app: Express = express();
 
@@ -46,6 +47,7 @@ registerVoiceLiveTelemetryRoute(app);
 registerVoiceLiveHealthRoute(app);
 registerVoiceLiveSmokeRoute(app);
 registerSessionRoute(app);
+registerEvaluateRoute(app);
 app.use("/api", router);
 
 // Serve the built frontend (single-origin deployment, e.g. Azure App Service).

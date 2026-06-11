@@ -8,6 +8,15 @@ const MAX_TRANSCRIPT_ENTRIES = 500;
 const ALLOWED_STYLES = new Set(["analytical", "driving", "expressive", "amiable"]);
 const ALLOWED_INTENSITIES = new Set(["subtle", "standard", "extreme"]);
 const ALLOWED_TIERS = new Set(["green", "amber", "red"]);
+const ALLOWED_SIGNALS = new Set(["green", "amber", "grey"]);
+
+interface StoredAssessment {
+  tier: string;
+  overall: string;
+  strengths: string[];
+  suggestions: { text: string; quotedLine?: string }[];
+  turns: { signal: string; reason: string; quote?: string }[];
+}
 
 function isSameOrigin(req: Request): boolean {
   const origin = (req.headers as Record<string, string | undefined>).origin;
@@ -28,6 +37,42 @@ function str(v: unknown, max: number): string | null {
 
 function int(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? Math.trunc(v) : null;
+}
+
+// Sanitize the optional AI assessment (already shaped by /api/evaluate, but it
+// arrives here via the client so we clamp it again defensively). Null when
+// absent or unusable — the session still saves with the deterministic tier.
+function sanitizeAssessment(v: unknown): StoredAssessment | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const tier = str(o["tier"], 16);
+  if (!tier || !ALLOWED_TIERS.has(tier)) return null;
+  const overall = str(o["overall"], 4_000) ?? "";
+  const strengths = (Array.isArray(o["strengths"]) ? (o["strengths"] as unknown[]) : [])
+    .filter((s): s is string => typeof s === "string")
+    .slice(0, 10)
+    .map((s) => s.slice(0, 500));
+  const suggestions = (Array.isArray(o["suggestions"]) ? (o["suggestions"] as unknown[]) : [])
+    .slice(0, 10)
+    .map((s) => {
+      const so = (s ?? {}) as Record<string, unknown>;
+      const text = str(so["text"], 500) ?? "";
+      const quotedLine = str(so["quotedLine"], 500);
+      return quotedLine ? { text, quotedLine } : { text };
+    })
+    .filter((s) => s.text.length > 0);
+  const turns = (Array.isArray(o["turns"]) ? (o["turns"] as unknown[]) : [])
+    .slice(0, 200)
+    .map((t) => {
+      const to = (t ?? {}) as Record<string, unknown>;
+      const signal = typeof to["signal"] === "string" && ALLOWED_SIGNALS.has(to["signal"])
+        ? (to["signal"] as string)
+        : "grey";
+      const reason = str(to["reason"], 1_000) ?? "";
+      const quote = str(to["quote"], 1_000);
+      return quote ? { signal, reason, quote } : { signal, reason };
+    });
+  return { tier, overall, strengths, suggestions, turns };
 }
 
 // Persist a completed training session for later analytics. Same-origin only,
@@ -124,6 +169,7 @@ export function registerSessionRoute(app: Express): void {
           durationMs,
           clientSessionId: str(raw["clientSessionId"], 128),
           transcript,
+          assessment: sanitizeAssessment(raw["assessment"]),
         })
         .returning({ id: trainingSessionsTable.id });
 

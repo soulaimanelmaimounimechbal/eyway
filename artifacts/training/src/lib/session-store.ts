@@ -3,6 +3,7 @@
 // save must not break the user's flow or block navigation to the outcome.
 import { getTelemetrySessionId } from "./telemetry";
 import type { TranscriptEntry } from "./voice-client";
+import type { AiAssessment } from "./assessment";
 
 const ENDPOINT = `${import.meta.env.BASE_URL}api/sessions`;
 
@@ -17,6 +18,7 @@ export interface SaveSessionInput {
   hits: string[];
   durationMs?: number;
   transcript: TranscriptEntry[];
+  assessment?: AiAssessment | null;
 }
 
 export function saveTrainingSession(input: SaveSessionInput): void {
