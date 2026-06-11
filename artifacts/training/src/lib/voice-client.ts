@@ -206,11 +206,12 @@ export class VoiceClient {
     if (this.micStream) { this.micStream.getTracks().forEach((t) => t.stop()); this.micStream = null; }
     if (this.ctx) { try { await this.ctx.close(); } catch {} this.ctx = null; }
     if (this.playCtx) {
-      const now = this.playCtx.currentTime;
-      const wait = Math.max(0, this.playQueueEndsAt - now) * 1000 + 200;
+      // Cut the assistant off mid-sentence: ending the call must silence any
+      // audio that is currently playing or still queued, not let it finish.
+      this.cancelPendingPlayback();
       const pc = this.playCtx;
       this.playCtx = null;
-      setTimeout(() => { pc.close().catch(() => {}); }, wait);
+      pc.close().catch(() => {});
     }
     this.setState("closed");
   }
