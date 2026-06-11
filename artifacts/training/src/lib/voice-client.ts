@@ -8,6 +8,20 @@ export interface TranscriptEntry {
   done: boolean;
 }
 
+// Replies shorter than this many words are treated as throwaway ("yes",
+// "I agree", "okay sure") and do not count as a user turn for the turn
+// counter or scoring. Aligned with coaching's GREY_WORDS so a turn that
+// renders as "too short" (grey dot) also doesn't count toward the total.
+export const MIN_TURN_WORDS = 4;
+
+export function isScorableUserTurn(t: TranscriptEntry): boolean {
+  return (
+    t.role === "user" &&
+    t.done &&
+    t.text.trim().split(/\s+/).filter(Boolean).length >= MIN_TURN_WORDS
+  );
+}
+
 export interface VoiceClientEvents {
   onStateChange?: (s: VoiceState) => void;
   onTranscript?: (t: TranscriptEntry[]) => void;
@@ -705,7 +719,7 @@ export function scoreTranscript(
   agentKeywords: string[],
 ): { tier: "green" | "amber" | "red"; hits: string[]; userTurns: number; avgWords: number } {
   void style;
-  const userEntries = transcript.filter((t) => t.role === "user" && t.done && t.text.trim().length > 0);
+  const userEntries = transcript.filter(isScorableUserTurn);
   const userText = userEntries.map((t) => t.text.toLowerCase()).join(" ");
   const userTurns = userEntries.length;
   const totalWords = userEntries.reduce((sum, t) => sum + t.text.trim().split(/\s+/).length, 0);

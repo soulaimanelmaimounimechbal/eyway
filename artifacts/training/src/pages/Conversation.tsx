@@ -2,16 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ProgressDots } from "@/components/ProgressDots";
 import { AGENTS, DEFAULT_INTENSITY, type Intensity, type SocialStyle } from "@/lib/agents";
-import { VoiceClient, type TranscriptEntry, type VoiceState } from "@/lib/voice-client";
-import { Mic, MicOff, PhoneOff, Loader2, MessageSquareWarning, Lightbulb, X, Hand, MousePointerClick, ClipboardList, ChevronDown, ChevronRight } from "lucide-react";
+import { VoiceClient, isScorableUserTurn, type TranscriptEntry, type VoiceState } from "@/lib/voice-client";
+import { Mic, MicOff, PhoneOff, Loader2, MessageSquareWarning, Lightbulb, Hand, MousePointerClick } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   evaluateTurn,
   LIVE_STYLE_TIPS,
-  pickNudge,
-  SCENARIO_TALKING_POINTS,
   TURN_SIGNAL_CLASSES,
-  type CoachingNudge,
   type TurnEvaluation,
 } from "@/lib/coaching";
 import { emit } from "@/lib/telemetry";
@@ -65,10 +62,6 @@ export default function Conversation({
   const turnIndexRef = useRef(0);
   const [warningShownAt30s, setWarningShownAt30s] = useState(false);
   const [showSignals, setShowSignals] = useState(true);
-  const [nudge, setNudge] = useState<CoachingNudge | null>(null);
-  const firedNudgesRef = useRef<Set<string>>(new Set());
-  const lastNudgeAtRef = useRef(0);
-  const nudgeDismissTimerRef = useRef<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
   const endedRef = useRef(false);
   const firstAudioEmittedRef = useRef(false);
@@ -141,7 +134,12 @@ export default function Conversation({
     () => transcript.filter((t) => t.role === "user" && t.done && t.text.trim()),
     [transcript],
   );
-  const userTurns = completedUserTurns.length;
+  // Very short replies (e.g. "yes", "okay sure") don't count as a turn for
+  // the turn counter or scoring — see isScorableUserTurn.
+  const userTurns = useMemo(
+    () => completedUserTurns.filter(isScorableUserTurn).length,
+    [completedUserTurns],
+  );
 
   // Per-turn evaluations (memoised so the transcript map doesn't recompute
   // for every animation-frame state change).
@@ -151,38 +149,6 @@ export default function Conversation({
     return m;
   }, [completedUserTurns, agent]);
 
-  // Coaching nudge: fire after every 2 user turns when the last two were
-  // both off-style, with a 30s cool-down and never repeat the same nudge.
-  useEffect(() => {
-    if (userTurns < 2 || userTurns % 2 !== 0) return;
-    if (assistantSpeaking) return; // wait until the assistant has finished
-    if (nudge) return; // one nudge on screen at a time
-    if (Date.now() - lastNudgeAtRef.current < 30_000) return;
-    const candidate = pickNudge(completedUserTurns, agent, firedNudgesRef.current);
-    if (!candidate) return;
-    firedNudgesRef.current.add(candidate.id);
-    lastNudgeAtRef.current = Date.now();
-    setNudge(candidate);
-    if (nudgeDismissTimerRef.current) window.clearTimeout(nudgeDismissTimerRef.current);
-    nudgeDismissTimerRef.current = window.setTimeout(() => {
-      setNudge(null);
-      nudgeDismissTimerRef.current = null;
-    }, 12_000);
-  }, [userTurns, assistantSpeaking, nudge, completedUserTurns, agent]);
-
-  useEffect(() => {
-    return () => {
-      if (nudgeDismissTimerRef.current) window.clearTimeout(nudgeDismissTimerRef.current);
-    };
-  }, []);
-
-  function dismissNudge() {
-    setNudge(null);
-    if (nudgeDismissTimerRef.current) {
-      window.clearTimeout(nudgeDismissTimerRef.current);
-      nudgeDismissTimerRef.current = null;
-    }
-  }
   const remaining = Math.max(0, MAX_SECONDS - seconds);
   const timeUp = remaining <= 0;
   const turnsUp = userTurns >= MAX_TURNS;
@@ -194,7 +160,7 @@ export default function Conversation({
     if (endedRef.current) return;
     endedRef.current = true;
     const finalTranscript = clientRef.current?.getTranscript() ?? transcript;
-    const turns = finalTranscript.filter((t) => t.role === "user" && t.done && t.text.trim()).length;
+    const turns = finalTranscript.filter(isScorableUserTurn).length;
     const durationMs = startedAtRef.current ? Date.now() - startedAtRef.current : 0;
     emit("call_ended", { reason, turns, durationMs, persona: style });
     const c = clientRef.current;
@@ -550,31 +516,6 @@ export default function Conversation({
                 </div>
               )}
             </div>
-            {nudge && (
-              <div
-                className="rounded-2xl border border-primary/40 bg-primary/5 p-4 shadow-sm"
-                data-testid="coaching-nudge"
-                data-nudge-id={nudge.id}
-                role="status"
-                aria-live="polite"
-              >
-                <div className="flex items-start gap-2">
-                  <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                  <div className="flex-1">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-primary">Coaching nudge</div>
-                    <p className="mt-1 text-sm leading-snug text-foreground">{nudge.text}</p>
-                  </div>
-                  <button
-                    onClick={dismissNudge}
-                    className="rounded p-1 text-muted-foreground hover-elevate"
-                    aria-label="Dismiss nudge"
-                    data-testid="button-dismiss-nudge"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            )}
             {/* Persistent style coach: the main thing participants should be
                 thinking about mid-call is matching the persona's style, not
                 what facts to recite. These pointers stay visible for the
@@ -609,7 +550,6 @@ export default function Conversation({
                 They react to <em>how</em> you say it, not just what you say.
               </p>
             </div>
-            <TalkingPointsPanel personaName={agent.name} />
           </aside>
         </div>
 
@@ -691,58 +631,6 @@ function ConfirmEndDialog({
           </Button>
         </div>
       </div>
-    </div>
-  );
-}
-
-// Content companion to the style panel. Scenario-scoped substance so the
-// participant can pick a point and spend their attention on *delivering* it in
-// the persona's style. Softer/secondary styling + a distinct icon so it reads
-// as "substance", not a second style panel. Expanded by default; collapse state
-// is intentionally local (fresh call = fresh expand).
-function TalkingPointsPanel({ personaName }: { personaName: string }) {
-  const [open, setOpen] = useState(true);
-  return (
-    <div
-      className="rounded-2xl border border-dashed bg-muted/30 p-4"
-      data-testid="talking-points"
-    >
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 rounded text-left hover-elevate"
-        aria-expanded={open}
-        data-testid="button-toggle-talking-points"
-      >
-        <ClipboardList className="h-4 w-4 text-muted-foreground" />
-        <h4 className="flex-1 text-sm font-semibold text-foreground">Talking points</h4>
-        <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
-          {open ? "Hide" : "Show"}
-          {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        </span>
-      </button>
-      {open && (
-        <div className="mt-3 space-y-3">
-          {SCENARIO_TALKING_POINTS.map((group, gi) => (
-            <div key={gi} data-testid={`talking-point-group-${gi}`}>
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {group.heading}
-              </div>
-              <ul className="mt-1.5 space-y-1.5 text-sm leading-snug text-foreground/90">
-                {group.points.map((point, pi) => (
-                  <li key={pi} className="flex gap-2" data-testid={`talking-point-${gi}-${pi}`}>
-                    <span aria-hidden className="mt-1.5 inline-block h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60" />
-                    <span>{point}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-          <p className="border-t pt-3 text-[11px] text-muted-foreground">
-            Use these as raw material. Your job is to match {personaName}'s style — that's what's being practised here.
-          </p>
-        </div>
-      )}
     </div>
   );
 }

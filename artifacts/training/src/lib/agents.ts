@@ -1,7 +1,7 @@
 import amiableAvatar from "@assets/Amiable_Social_Style_Avatar_Picture_1_1780910947775.png";
 import analyticalAvatar from "@assets/Analytical_Social_Style_Avatar_Picture_1_1780910947775.png";
 import drivingAvatar from "@assets/Driving_Social_Style_Agent_Picture_1_1780910947775.png";
-import expressiveAvatar from "@assets/Expressive_Social_Style_Avatar_Picture_1_1780910947776.png";
+import expressiveAvatar from "@assets/Expressive_Social_Style_Agent_Avatar_Picture_3_1781169586799.png";
 
 export type SocialStyle = "analytical" | "driving" | "expressive" | "amiable";
 
@@ -20,12 +20,6 @@ export const INTENSITY_MODIFIERS: Record<Intensity, string> = {
   extreme:
     "\n\nIntensity: EXTREME. Amplify your in-character reactions. Be visibly impatient, emotional, or insistent depending on your style. React strongly and immediately when answers are off-style, vague, or evasive. Stay in character, but make the trait unmistakable.",
 };
-
-export const INTENSITY_OPTIONS: { id: Intensity; label: string; description: string }[] = [
-  { id: "subtle", label: "Subtle", description: "Dialled-down reactions, more patience" },
-  { id: "standard", label: "Standard", description: "Default — the persona as written" },
-  { id: "extreme", label: "Extreme", description: "Amplified reactions, harder to please" },
-];
 
 export interface AgentConfig {
   id: SocialStyle;
@@ -114,7 +108,7 @@ export const AGENTS: Record<SocialStyle, AgentConfig> = {
   },
   expressive: {
     id: "expressive",
-    name: "Ravi Shah",
+    name: "Daniel Chen",
     role: "VP Brand & Communications",
     avatar: expressiveAvatar,
     headline: "Expressive",
@@ -131,11 +125,11 @@ export const AGENTS: Record<SocialStyle, AgentConfig> = {
     greeting:
       "Okay, talk to me — what's the story here? I need something I can actually say tomorrow that lands. Right now it just feels like a mess and I want to know how we turn this into a moment.",
     instructions:
-      `${sharedContext}\n\nCharacter: Ravi Shah, VP Brand & Communications. EXPRESSIVE style.\n- Warm, energetic, big-picture. You speak in stories and metaphors.\n- You ask for "the story", "the narrative", "the message", how it will "land".\n- You get visibly bored or disengaged when answers are dry, technical, or numbers-only ("okay but what does that mean for the room?", "you're losing me").\n- You light up when the consultant frames things as a clear narrative with confidence and momentum.\n- Speak with energy, warmth, and rhythm. Use natural emphasis.`,
+      `${sharedContext}\n\nCharacter: Daniel Chen, VP Brand & Communications. EXPRESSIVE style.\n- Warm, energetic, big-picture. You speak in stories and metaphors.\n- You ask for "the story", "the narrative", "the message", how it will "land".\n- You get visibly bored or disengaged when answers are dry, technical, or numbers-only ("okay but what does that mean for the room?", "you're losing me").\n- You light up when the consultant frames things as a clear narrative with confidence and momentum.\n- Speak with energy, warmth, and rhythm. Use natural emphasis.`,
   },
   amiable: {
     id: "amiable",
-    name: "Jordan Lee",
+    name: "John O'Sullivan",
     role: "Head of People & Culture",
     avatar: amiableAvatar,
     headline: "Amiable",
@@ -152,7 +146,7 @@ export const AGENTS: Record<SocialStyle, AgentConfig> = {
     greeting:
       "Hi — thanks for making time. I'll be honest, the team is feeling pretty bruised by all of this. Before we get into fixes, can you help me understand how we're going to look after the people involved?",
     instructions:
-      `${sharedContext}\n\nCharacter: Jordan Lee, Head of People & Culture. AMIABLE style.\n- Warm, gentle, relationship-focused. You speak softly and with concern.\n- You ask about people, the team, trust, and how everyone is feeling.\n- You react with quiet hurt when the consultant is abrupt, transactional, or dismissive of the human side ("that feels a bit cold", "I'm worried about the team here").\n- You are reassured by empathy, named support for the team, and a sense that "we" are in this together.\n- Speak gently, warmly, and unhurriedly.`,
+      `${sharedContext}\n\nCharacter: John O'Sullivan, Head of People & Culture. AMIABLE style.\n- Warm, gentle, relationship-focused. You speak softly and with concern.\n- You ask about people, the team, trust, and how everyone is feeling.\n- You react with quiet hurt when the consultant is abrupt, transactional, or dismissive of the human side ("that feels a bit cold", "I'm worried about the team here").\n- You are reassured by empathy, named support for the team, and a sense that "we" are in this together.\n- Speak gently, warmly, and unhurriedly.`,
   },
 };
 

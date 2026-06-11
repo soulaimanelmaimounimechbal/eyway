@@ -1,5 +1,5 @@
 import type { AgentConfig, SocialStyle } from "./agents";
-import type { TranscriptEntry } from "./voice-client";
+import { isScorableUserTurn, type TranscriptEntry } from "./voice-client";
 
 export type TurnSignal = "green" | "amber" | "grey";
 export type Tier = "green" | "amber" | "red";
@@ -9,11 +9,6 @@ export interface TurnEvaluation {
   note?: string;
   hits: string[];
   wordCount: number;
-}
-
-export interface CoachingNudge {
-  id: string;
-  text: string;
 }
 
 export interface AnchoredSuggestion {
@@ -159,44 +154,6 @@ export function reconcileWithTier(
   return out;
 }
 
-const NUDGE_TEXTS: Record<SocialStyle, { id: string; text: string }> = {
-  analytical: {
-    id: "analytical:data",
-    text: "Morgan loves data — try grounding your point in a number or source.",
-  },
-  driving: {
-    id: "driving:action",
-    text: "Dana wants action — name an owner and a date.",
-  },
-  expressive: {
-    id: "expressive:story",
-    text: "Ravi thinks in stories — give him a one-line narrative he can repeat.",
-  },
-  amiable: {
-    id: "amiable:people",
-    text: "Jordan listens for the team — name how this lands for the people.",
-  },
-};
-
-/**
- * Decide whether a coaching nudge should fire right now.
- * Caller is responsible for de-duplicating by nudge id (already-fired set)
- * and for enforcing the cool-down between nudges.
- */
-export function pickNudge(
-  userTurns: TranscriptEntry[],
-  persona: AgentConfig,
-  alreadyFired: Set<string>,
-): CoachingNudge | null {
-  if (userTurns.length < 2) return null;
-  const last2 = userTurns.slice(-2).map((t) => evaluateTurn(t, persona));
-  const offStyle = last2.every((e) => e.signal !== "green");
-  if (!offStyle) return null;
-  const candidate = NUDGE_TEXTS[persona.id];
-  if (alreadyFired.has(candidate.id)) return null;
-  return candidate;
-}
-
 // Same per-persona pointers we anchor in the post-call Summary, but exposed
 // for the in-call coaching panel so participants can stay aligned to the
 // style *while* they talk — not just learn after the fact.
@@ -212,56 +169,23 @@ export const LIVE_STYLE_TIPS: Record<SocialStyle, string[]> = {
     "Cut hedging ('I think we could maybe…') — Dana hears it as drift.",
   ],
   expressive: [
-    "Give Ravi one sentence he can use in the room tomorrow.",
+    "Give Daniel one sentence he can use in the room tomorrow.",
     "Reach for a metaphor or analogy to make it stick.",
     "Tie it to people and momentum, not process.",
   ],
   amiable: [
     "Acknowledge how the team is feeling before proposing a fix.",
-    "Use 'we' more than 'I' — Jordan listens for partnership.",
+    "Use 'we' more than 'I' — John listens for partnership.",
     "Slow down. Let pauses sit. They read warmth as care.",
   ],
 };
-
-// Content scaffolding for the Glenara/sustainability-report scenario. This is
-// scenario-scoped, NOT persona-scoped — the same situation is shared across all
-// four personas, so the substance is identical for every call. The participant's
-// job is to deliver these in the persona's *style* (that's what LIVE_STYLE_TIPS
-// is for). Each bullet is one pickable line, not a script to read verbatim.
-export type TalkingPointGroup = { heading: string; points: string[] };
-
-export const SCENARIO_TALKING_POINTS: TalkingPointGroup[] = [
-  {
-    heading: "What happened with the report",
-    points: [
-      "The underlying data is correct — the issue was how parts were presented, not what was measured.",
-      "A few sections were easy to misread out of context, which is what fed the internal pushback.",
-    ],
-  },
-  {
-    heading: "What you can commit to right now",
-    points: [
-      "I can have a one-pager clarifying the methodology by end of day.",
-      "We'll add a footnote and short appendix on the contested section before tomorrow's update.",
-      "I'll flag exactly which figures are final versus still being reviewed.",
-    ],
-  },
-  {
-    heading: "What we'll do next",
-    points: [
-      "A stakeholder Q&A doc to get ahead of the common questions by Thursday.",
-      "A joint review with your internal team next week to rebuild confidence.",
-      "A quick pre-brief for leadership before the update lands.",
-    ],
-  },
-];
 
 export function summarizeCall(
   transcript: TranscriptEntry[],
   persona: AgentConfig,
   tier: Tier,
 ): CallSummary {
-  const userTurns = transcript.filter((t) => t.role === "user" && t.done && t.text.trim());
+  const userTurns = transcript.filter(isScorableUserTurn);
   const rawEvals = userTurns.map((t) => evaluateTurn(t, persona));
   const evals = reconcileWithTier(rawEvals, tier, persona);
 
@@ -306,14 +230,14 @@ export const TURN_SIGNAL_CLASSES: Record<TurnSignal, { dot: string; ring: string
   grey: { dot: "bg-muted-foreground/50", ring: "ring-muted-foreground/30", label: "off style" },
 };
 
-/** Pair each completed user turn with the next assistant turn that follows it. */
+/** Pair each scorable user turn with the next assistant turn that follows it. */
 export function pairTurns(
   transcript: TranscriptEntry[],
 ): { user: TranscriptEntry; assistant?: TranscriptEntry }[] {
   const pairs: { user: TranscriptEntry; assistant?: TranscriptEntry }[] = [];
   for (let i = 0; i < transcript.length; i++) {
     const t = transcript[i];
-    if (t.role !== "user" || !t.done || !t.text.trim()) continue;
+    if (!isScorableUserTurn(t)) continue;
     let assistant: TranscriptEntry | undefined;
     for (let j = i + 1; j < transcript.length; j++) {
       if (transcript[j].role === "assistant" && transcript[j].done) {
@@ -336,6 +260,6 @@ export function evaluateAllTurns(
   persona: AgentConfig,
   tier: Tier,
 ): TurnEvaluation[] {
-  const userTurns = transcript.filter((t) => t.role === "user" && t.done && t.text.trim());
+  const userTurns = transcript.filter(isScorableUserTurn);
   return reconcileWithTier(userTurns.map((t) => evaluateTurn(t, persona)), tier, persona);
 }

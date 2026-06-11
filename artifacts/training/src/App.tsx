@@ -40,9 +40,9 @@ function App() {
   const isDebug = typeof window !== "undefined"
     && new URLSearchParams(window.location.search).get("debug") === "1";
   const [step, setStep] = useState<Step>("intro");
-  const [selfData, setSelfData] = useState<SelfReflectionData>({ selfStyle: "", note: "" });
+  const [selfData, setSelfData] = useState<SelfReflectionData>({ note: "" });
   const [style, setStyle] = useState<SocialStyle | null>(null);
-  const [intensity, setIntensity] = useState<Intensity>(DEFAULT_INTENSITY);
+  const intensity: Intensity = DEFAULT_INTENSITY;
   const [result, setResult] = useState<SessionResult | null>(null);
 
   // Guard: if we land on a step that requires state we don't have, navigate
@@ -71,8 +71,6 @@ function App() {
           <SelectClient
             selected={style}
             onSelect={setStyle}
-            intensity={intensity}
-            onIntensityChange={setIntensity}
             onBack={() => setStep("self")}
             onNext={() => style && setStep("preflight")}
           />
@@ -100,7 +98,6 @@ function App() {
               saveTrainingSession({
                 style,
                 intensity,
-                selfReportedStyle: selfData.selfStyle || undefined,
                 selfNote: selfData.note || undefined,
                 tier: scored.tier,
                 userTurns: scored.userTurns,
