@@ -7,7 +7,7 @@ export default function Scenario({ onNext, onBack }: { onNext: () => void; onBac
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col p-6 sm:p-10">
       <header className="flex items-center justify-between">
         <button onClick={onBack} className="text-sm text-muted-foreground hover-elevate rounded px-2 py-1" data-testid="button-back">← Back</button>
-        <ProgressDots step={1} total={7} label="Step 2 of 7" />
+        <ProgressDots step={1} total={6} label="Step 2 of 6" />
       </header>
 
       <main className="flex-1 py-10">

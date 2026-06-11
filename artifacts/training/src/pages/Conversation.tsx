@@ -334,7 +334,7 @@ export default function Conversation({
         >
           ← Back
         </button>
-        <ProgressDots step={4} total={7} label="Step 5 of 7" />
+        <ProgressDots step={3} total={6} label="Step 4 of 6" />
         <Button
           size="sm"
           variant="destructive"

@@ -10,7 +10,7 @@ export default function Intro({ onNext }: { onNext: () => void }) {
           <div className="h-6 w-6 rounded bg-primary" />
           <span className="text-sm font-semibold tracking-wide">EY · Social Styles Lab</span>
         </div>
-        <ProgressDots step={0} total={7} label="Step 1 of 7" />
+        <ProgressDots step={0} total={6} label="Step 1 of 6" />
       </header>
 
       <main className="flex flex-1 flex-col justify-center gap-8 py-10">

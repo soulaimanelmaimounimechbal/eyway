@@ -4,7 +4,6 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Intro from "@/pages/Intro";
 import Scenario from "@/pages/Scenario";
-import SelfReflection, { type SelfReflectionData } from "@/pages/SelfReflection";
 import SelectClient from "@/pages/SelectClient";
 import Preflight from "@/pages/Preflight";
 import Conversation from "@/pages/Conversation";
@@ -20,7 +19,6 @@ const queryClient = new QueryClient();
 type Step =
   | "intro"
   | "scenario"
-  | "self"
   | "select"
   | "preflight"
   | "conversation"
@@ -40,7 +38,6 @@ function App() {
   const isDebug = typeof window !== "undefined"
     && new URLSearchParams(window.location.search).get("debug") === "1";
   const [step, setStep] = useState<Step>("intro");
-  const [selfData, setSelfData] = useState<SelfReflectionData>({ note: "" });
   const [style, setStyle] = useState<SocialStyle | null>(null);
   const intensity: Intensity = DEFAULT_INTENSITY;
   const [result, setResult] = useState<SessionResult | null>(null);
@@ -57,21 +54,13 @@ function App() {
       case "intro":
         return <Intro onNext={() => setStep("scenario")} />;
       case "scenario":
-        return <Scenario onBack={() => setStep("intro")} onNext={() => setStep("self")} />;
-      case "self":
-        return (
-          <SelfReflection
-            initial={selfData}
-            onBack={() => setStep("scenario")}
-            onNext={(d) => { setSelfData(d); setStep("select"); }}
-          />
-        );
+        return <Scenario onBack={() => setStep("intro")} onNext={() => setStep("select")} />;
       case "select":
         return (
           <SelectClient
             selected={style}
             onSelect={setStyle}
-            onBack={() => setStep("self")}
+            onBack={() => setStep("scenario")}
             onNext={() => style && setStep("preflight")}
           />
         );
@@ -98,7 +87,6 @@ function App() {
               saveTrainingSession({
                 style,
                 intensity,
-                selfNote: selfData.note || undefined,
                 tier: scored.tier,
                 userTurns: scored.userTurns,
                 avgWords: scored.avgWords,
@@ -138,7 +126,7 @@ function App() {
           />
         );
     }
-  }, [step, selfData, style, intensity, result]);
+  }, [step, style, intensity, result]);
 
   return (
     <QueryClientProvider client={queryClient}>

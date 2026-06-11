@@ -202,7 +202,7 @@ export default function Preflight({
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col p-6 sm:p-10">
       <header className="flex items-center justify-between">
         <button onClick={onBack} className="text-sm text-muted-foreground hover-elevate rounded px-2 py-1" data-testid="button-back">← Back</button>
-        <ProgressDots step={4} total={7} label="Step 5 of 7 · Pre-flight" />
+        <ProgressDots step={3} total={6} label="Step 4 of 6 · Pre-flight" />
       </header>
 
       <main className="flex-1 py-8">

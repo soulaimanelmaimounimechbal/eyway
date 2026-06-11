@@ -76,7 +76,7 @@ export default function Outcome({
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col p-6 sm:p-10">
       <header className="flex items-center justify-between">
         <div />
-        <ProgressDots step={5} total={7} label="Step 6 of 7" />
+        <ProgressDots step={4} total={6} label="Step 5 of 6" />
       </header>
 
       <main className="flex flex-1 flex-col gap-6 py-8">
