@@ -12,7 +12,6 @@ export default function Intro({ onNext }: { onNext: () => void }) {
         </div>
         <ProgressDots step={0} total={6} label="Step 1 of 6" />
       </header>
-
       <main className="flex flex-1 flex-col justify-center gap-8 py-10">
         <div className="space-y-4">
           <span className="inline-flex items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs font-medium uppercase tracking-wider text-foreground">
@@ -21,11 +20,7 @@ export default function Intro({ onNext }: { onNext: () => void }) {
           <h1 className="text-4xl font-semibold leading-tight sm:text-5xl">
             Adapting your style in client conversations
           </h1>
-          <p className="max-w-2xl text-lg text-muted-foreground">
-            You'll walk into a high-stakes meeting with one of four client personalities, each
-            modelled on the TRACOM Social Styles framework. Speak naturally. The client will
-            respond in character, and you'll get feedback on how well you adapted.
-          </p>
+          <p className="max-w-2xl text-lg text-muted-foreground">You'll walk into a high-stakes meeting with one of four clients, each modelled on the TRACOM Social Styles framework. Speak naturally. The client will respond in character, and you'll get feedback on how well you adapted.</p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3">
@@ -34,7 +29,6 @@ export default function Intro({ onNext }: { onNext: () => void }) {
           <Feature icon={<Sparkles className="h-5 w-5" />} title="Styled feedback" body="Tips tied to each personality" />
         </div>
       </main>
-
       <footer className="flex items-center justify-end pt-6">
         <Button size="lg" onClick={onNext} data-testid="button-start">
           Begin training
