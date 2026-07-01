@@ -24,9 +24,9 @@ export default function Intro({ onNext }: { onNext: () => void }) {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3">
-          <Feature icon={<Users className="h-5 w-5" />} title="4 client styles" body="Analytical, Driving, Expressive, Amiable" />
+          <Feature icon={<Users className="h-5 w-5" />} title="4 client social styles" body="Analytical, Driving, Expressive, Amiable" />
           <Feature icon={<Mic className="h-5 w-5" />} title="Live voice" body="Real-time, two-way conversation" />
-          <Feature icon={<Sparkles className="h-5 w-5" />} title="Styled feedback" body="Tips tied to each personality" />
+          <Feature icon={<Sparkles className="h-5 w-5" />} title="Styled feedback" body="Tips tied to each social style" />
         </div>
       </main>
       <footer className="flex items-center justify-end pt-6">
