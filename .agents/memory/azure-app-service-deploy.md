@@ -46,11 +46,18 @@ serves the built frontend, and CI ships one self-contained package.
 ## Two deploy paths (both do the SAME packaging)
 - **GitHub Actions**: `.github/workflows/main_ey-way.yml` (OIDC login, `webapps-deploy`).
 - **Local Git / Kudu**: root `.deployment` runs `deploy.sh`, which reproduces the
-  Actions packaging on the App Service build container. IMPORTANT: on Oryx the Node
-  dir is read-only, so `corepack enable` can't write a `pnpm` PATH shim and a bare
-  `pnpm` is "command not found". Call pnpm THROUGH corepack instead:
-  `corepack prepare pnpm@X --activate` then run everything as `corepack pnpm ...`
-  (set `COREPACK_ENABLE_DOWNLOAD_PROMPT=0`). Fallback `npm i -g pnpm`.
+  Actions packaging on the App Service build container. Two Kudu gotchas learned:
+  1. On Oryx the Node dir is read-only, so `corepack enable` can't write a `pnpm`
+     PATH shim and a bare `pnpm` is "command not found". Call pnpm THROUGH corepack:
+     `corepack prepare pnpm@X --activate` then run everything as `corepack pnpm ...`
+     (set `COREPACK_ENABLE_DOWNLOAD_PROMPT=0`). Fallback `npm i -g pnpm`.
+  2. `/home` (= DEPLOYMENT_SOURCE /home/site/repository AND DEPLOYMENT_TARGET
+     /home/site/wwwroot) is an Azure Files SMB share; pnpm's atomic node_modules
+     renames fail there with `ERR_PNPM_EACCES`. So build on LOCAL disk: tar-mirror
+     the source (exclude .git + node_modules) into /tmp, run install/build/`pnpm
+     deploy` there, then `cp -R` only the finished package onto wwwroot. Keep the
+     pnpm `--store-dir` on persistent /home (SMB store WRITES work; only
+     node_modules renames don't) so packages are reused across deploys.
   Sequence: `pnpm install --frozen-lockfile`; build api-server + training
   with `BASE_PATH=/ PORT=8080`; `pnpm --filter @workspace/api-server --prod --legacy
   --node-linker=hoisted deploy`; copy `artifacts/training/dist/public` → `public/`;

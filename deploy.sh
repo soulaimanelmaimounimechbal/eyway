@@ -8,6 +8,13 @@
 #
 # Why NOT the naive `cp -R dist/*`: the api-server is an esbuild bundle that keeps
 # @azure/* external, so the runtime needs a real (hoisted, non-symlink) node_modules.
+#
+# Why build in /tmp (NOT in place): on Azure App Service Linux, /home (and hence
+# DEPLOYMENT_SOURCE=/home/site/repository and DEPLOYMENT_TARGET=/home/site/wwwroot)
+# is an Azure Files SMB network share. pnpm installs each package with an atomic
+# rename into node_modules, which the SMB share rejects with ERR_PNPM_EACCES. So we
+# mirror the source onto local disk (/tmp), do all pnpm/build work there, and copy
+# only the finished self-contained package onto the SMB share at the very end.
 set -euo pipefail
 
 # Kudu provides these; default them so the script is runnable/testable locally.
@@ -15,12 +22,14 @@ set -euo pipefail
 : "${DEPLOYMENT_TARGET:=$DEPLOYMENT_SOURCE/wwwroot}"
 
 PNPM_VERSION="10.26.1"
-PKG_DIR="$DEPLOYMENT_SOURCE/.deploy_pkg"
+# Local-disk (non-SMB) working area. Overridable for local testing.
+WORK_DIR="${BUILD_WORK_DIR:-/tmp/ey-way-build}"
+PKG_DIR="$WORK_DIR/.deploy_pkg"
 
 echo "==> Custom pnpm deployment starting"
-cd "$DEPLOYMENT_SOURCE"
 echo "    DEPLOYMENT_SOURCE=$DEPLOYMENT_SOURCE"
 echo "    DEPLOYMENT_TARGET=$DEPLOYMENT_TARGET"
+echo "    WORK_DIR=$WORK_DIR"
 echo "    node: $(node -v)"
 
 # --- Make pnpm available -------------------------------------------------------
@@ -46,9 +55,30 @@ if [ -z "$PNPM" ]; then
 fi
 echo "    pnpm: $($PNPM --version)"
 
+# --- Mirror source onto local disk ---------------------------------------------
+echo "==> Mirroring source to local disk ($WORK_DIR)"
+rm -rf "$WORK_DIR"
+mkdir -p "$WORK_DIR"
+# Copy the repo tree WITHOUT .git or any node_modules (those are rebuilt locally).
+tar -C "$DEPLOYMENT_SOURCE" \
+  --exclude='./.git' \
+  --exclude='./node_modules' \
+  --exclude='*/node_modules' \
+  --exclude='./.deploy_pkg' \
+  -cf - . | tar -C "$WORK_DIR" -xpf -
+
+cd "$WORK_DIR"
+# The pnpm content-addressable store lives on PERSISTENT storage (/home, next to
+# the repository) so packages are reused across deploys instead of re-downloaded
+# every time. Store writes to the SMB share work fine; only node_modules renames
+# don't — and node_modules is built here on local disk (WORK_DIR). Because store
+# and node_modules are on different filesystems, pnpm copies instead of hardlinks.
+STORE_DIR="${PNPM_DEPLOY_STORE_DIR:-$(cd "$DEPLOYMENT_SOURCE/.." && pwd)/.pnpm-deploy-store}"
+echo "    pnpm store: $STORE_DIR"
+
 # --- Install (full, incl. dev deps needed to build) ----------------------------
 echo "==> Installing dependencies (frozen lockfile)"
-$PNPM install --frozen-lockfile
+$PNPM install --frozen-lockfile --store-dir "$STORE_DIR"
 
 # --- Build backend + frontend --------------------------------------------------
 echo "==> Building backend (API + voice proxy)"
@@ -64,11 +94,12 @@ BASE_PATH="/" PORT="8080" $PNPM --filter @workspace/training run build
 # copy, so externalized @azure/* deps would fail at runtime (ERR_MODULE_NOT_FOUND).
 echo "==> Assembling self-contained package"
 rm -rf "$PKG_DIR"
-$PNPM --filter @workspace/api-server --prod --legacy --node-linker=hoisted deploy "$PKG_DIR"
+$PNPM --filter @workspace/api-server --prod --legacy --node-linker=hoisted \
+  --store-dir "$STORE_DIR" deploy "$PKG_DIR"
 
 echo "==> Co-locating built frontend as public/"
 rm -rf "$PKG_DIR/public"
-cp -R "$DEPLOYMENT_SOURCE/artifacts/training/dist/public" "$PKG_DIR/public"
+cp -R "$WORK_DIR/artifacts/training/dist/public" "$PKG_DIR/public"
 
 # --- Publish into wwwroot ------------------------------------------------------
 echo "==> Publishing to $DEPLOYMENT_TARGET"
@@ -82,9 +113,9 @@ esac
 mkdir -p "$DEPLOYMENT_TARGET"
 # Clear old contents (incl. dotfiles) without deleting the directory itself.
 find "$DEPLOYMENT_TARGET" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-# Copy contents (the trailing /. includes dotfiles).
+# Copy contents (the trailing /. includes dotfiles) onto the SMB share.
 cp -R "$PKG_DIR/." "$DEPLOYMENT_TARGET/"
 
-rm -rf "$PKG_DIR"
+rm -rf "$WORK_DIR"
 echo "==> Deployment complete"
 echo "    Ensure the App Service startup command is: NODE_ENV=production node dist/index.mjs"
