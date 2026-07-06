@@ -43,10 +43,25 @@ serves the built frontend, and CI ships one self-contained package.
   `AZURE_POSTGRESQL_SSL` is an explicit falsy/"disable" value. Either form works;
   don't set both.
 
+## Two deploy paths (both do the SAME packaging)
+- **GitHub Actions**: `.github/workflows/main_ey-way.yml` (OIDC login, `webapps-deploy`).
+- **Local Git / Kudu**: root `.deployment` runs `deploy.sh`, which reproduces the
+  Actions packaging on the App Service build container (corepack `pnpm@10`, fallback
+  `npm i -g pnpm`; `pnpm install --frozen-lockfile`; build api-server + training
+  with `BASE_PATH=/ PORT=8080`; `pnpm --filter @workspace/api-server --prod --legacy
+  --node-linker=hoisted deploy`; copy `artifacts/training/dist/public` → `public/`;
+  publish into `$DEPLOYMENT_TARGET` = wwwroot). Root `package.json` pins
+  `packageManager: pnpm@10.26.1` so corepack picks the lockfile-matching version.
+  Needed because Oryx auto-runs `npm install`, which the preinstall guard rejects.
+
 ## Other Azure-side settings the user must configure (not in code)
 - App settings (env): `AZURE_VOICE_LIVE_API_KEY`, `AZURE_VOICE_LIVE_ENDPOINT`,
   plus one of the DB forms above. Do NOT set `PORT` (Linux App Service injects it;
   the app reads `process.env.PORT`).
+- **End-of-call AI evaluation** (`/api/evaluate`) needs `AZURE_OPENAI_ENDPOINT` +
+  `AZURE_OPENAI_API_KEY` (optional `AZURE_OPENAI_DEPLOYMENT`, default `gpt-4o-mini`)
+  in prod too; without them it falls back to the deterministic scorer. The
+  `training_sessions` table now also has an `assessment` jsonb column to push.
 - **Enable Web Sockets = On** (Configuration → General settings). Off by default;
   the voice feature uses a WS upgrade at `/api/voice-live` and will not work
   without it.

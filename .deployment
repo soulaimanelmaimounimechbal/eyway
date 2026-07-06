@@ -1,0 +1,5 @@
+[config]
+# Azure local Git (Kudu) custom deployment.
+# Run our pnpm-based deploy.sh instead of Oryx's default npm build, which the
+# repo's preinstall guard rejects ("Use pnpm instead").
+command = bash deploy.sh
