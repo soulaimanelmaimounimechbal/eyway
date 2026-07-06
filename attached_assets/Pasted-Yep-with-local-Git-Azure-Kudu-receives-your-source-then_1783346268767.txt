@@ -1,0 +1,137 @@
+Yep — with **local Git**, Azure/Kudu receives your source, then **Oryx auto-builds it on App Service**. In your case, Oryx is choosing `npm install`, but your project blocks npm and says “Use pnpm instead”, so deployment fails.
+
+Microsoft/Oryx docs say that when you push through **local Git**, the source lands in `/home/site/repository`, App Service calls Oryx if no custom deployment script is provided, and the built app is placed into `/home/site/wwwroot`. They also document `COMMAND` as an App Setting that provides an alternate build/run script and bypasses the automatic build; `SCM_DO_BUILD_DURING_DEPLOYMENT=false` bypasses automatic build. [\[github.com\]](https://github.com/microsoft/Oryx/blob/main/doc/hosts/appservice.md)
+
+## Best fix for local Git: add a custom deployment script
+
+In your repo root, create these two files.
+
+### 1. `.deployment`
+
+```ini
+[config]
+command = bash deploy.sh
+```
+
+### 2. `deploy.sh`
+
+Use this first version:
+
+```bash
+#!/usr/bin/env bash
+set -e
+
+echo "Starting custom pnpm deployment"
+
+cd "$DEPLOYMENT_SOURCE"
+
+echo "Node version:"
+node -v
+
+echo "Enabling corepack"
+corepack enable
+
+echo "Preparing pnpm"
+corepack prepare pnpm@latest --activate
+
+echo "Installing dependencies with pnpm"
+pnpm install --frozen-lockfile
+
+echo "Building app"
+pnpm run build
+
+echo "Deploying build output to wwwroot"
+rm -rf "$DEPLOYMENT_TARGET"/*
+cp -R dist/* "$DEPLOYMENT_TARGET"/
+
+echo "Deployment complete"
+```
+
+Then run:
+
+```bash
+chmod +x deploy.sh
+git add .deployment deploy.sh
+git commit -m "Use pnpm custom deployment for Azure local git"
+git push azure main:master
+```
+
+## If your app is not Vite/static
+
+The line below assumes your build output is `dist`:
+
+```bash
+cp -R dist/* "$DEPLOYMENT_TARGET"/
+```
+
+If it is Next.js, Express, or another Node server app, use this instead:
+
+```bash
+cp -R . "$DEPLOYMENT_TARGET"/
+```
+
+and ensure your Azure startup command runs the right server command, for example:
+
+```bash
+pnpm start
+```
+
+But for your log, it looks like a TypeScript frontend-style project, so `dist` is a good first attempt.
+
+## Also pin Node — Azure picked Node 24
+
+Your log shows:
+
+```text
+Detected following platforms:
+nodejs: 24.13.0
+```
+
+I’d pin this in `package.json` to avoid surprises:
+
+```json
+"engines": {
+  "node": "20.x"
+},
+"packageManager": "pnpm@9.15.0"
+```
+
+Then commit:
+
+```bash
+git add package.json
+git commit -m "Pin Node and pnpm versions"
+git push azure main:master
+```
+
+## If `corepack` is not available on Azure
+
+Use this fallback in `deploy.sh` instead of the corepack lines:
+
+```bash
+npm install -g pnpm
+```
+
+So the middle section becomes:
+
+```bash
+echo "Installing pnpm"
+npm install -g pnpm
+
+echo "Installing dependencies with pnpm"
+pnpm install --frozen-lockfile
+```
+
+## Quick check before pushing again
+
+Run locally in Replit:
+
+```bash
+pnpm install
+pnpm run build
+ls
+```
+
+If you see `dist`, keep the script as-is. If the output folder has a different name, replace `dist` in `deploy.sh`.
+
+The key change is: **stop Azure/Oryx from running `npm install`; make Kudu run your `deploy.sh`, which uses pnpm.**
