@@ -23,29 +23,40 @@ echo "    DEPLOYMENT_SOURCE=$DEPLOYMENT_SOURCE"
 echo "    DEPLOYMENT_TARGET=$DEPLOYMENT_TARGET"
 echo "    node: $(node -v)"
 
-# --- Make pnpm available (corepack preferred, npm global as fallback) ----------
+# --- Make pnpm available -------------------------------------------------------
+# On Azure's Oryx build image the Node dir is read-only, so `corepack enable`
+# (which writes PATH shims) fails and a bare `pnpm` is NOT on PATH. Instead we
+# call pnpm THROUGH corepack (`corepack pnpm ...`), which resolves the pinned
+# packageManager version without needing a shim on PATH. Fall back to a global
+# npm install only if corepack is unavailable.
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+PNPM=""
 if corepack --version >/dev/null 2>&1; then
-  echo "==> Enabling pnpm@$PNPM_VERSION via corepack"
-  corepack enable >/dev/null 2>&1 || true
-  corepack prepare "pnpm@$PNPM_VERSION" --activate
-else
-  echo "==> corepack unavailable; installing pnpm globally via npm"
+  echo "==> Preparing pnpm@$PNPM_VERSION via corepack"
+  corepack prepare "pnpm@$PNPM_VERSION" --activate || true
+  if corepack pnpm --version >/dev/null 2>&1; then
+    PNPM="corepack pnpm"
+  fi
+fi
+if [ -z "$PNPM" ]; then
+  echo "==> Falling back to global npm install of pnpm@$PNPM_VERSION"
   # Global install does NOT run the workspace preinstall guard, so npm is fine here.
   npm install -g "pnpm@$PNPM_VERSION"
+  PNPM="pnpm"
 fi
-echo "    pnpm: $(pnpm -v)"
+echo "    pnpm: $($PNPM --version)"
 
 # --- Install (full, incl. dev deps needed to build) ----------------------------
 echo "==> Installing dependencies (frozen lockfile)"
-pnpm install --frozen-lockfile
+$PNPM install --frozen-lockfile
 
 # --- Build backend + frontend --------------------------------------------------
 echo "==> Building backend (API + voice proxy)"
-pnpm --filter @workspace/api-server run build
+$PNPM --filter @workspace/api-server run build
 
 echo "==> Building frontend (training UI)"
 # vite.config.ts THROWS if BASE_PATH or PORT are unset, even for `build`.
-BASE_PATH="/" PORT="8080" pnpm --filter @workspace/training run build
+BASE_PATH="/" PORT="8080" $PNPM --filter @workspace/training run build
 
 # --- Assemble the self-contained package ---------------------------------------
 # --legacy: pnpm v10 refuses non-injected workspace deploys otherwise.
@@ -53,7 +64,7 @@ BASE_PATH="/" PORT="8080" pnpm --filter @workspace/training run build
 # copy, so externalized @azure/* deps would fail at runtime (ERR_MODULE_NOT_FOUND).
 echo "==> Assembling self-contained package"
 rm -rf "$PKG_DIR"
-pnpm --filter @workspace/api-server --prod --legacy --node-linker=hoisted deploy "$PKG_DIR"
+$PNPM --filter @workspace/api-server --prod --legacy --node-linker=hoisted deploy "$PKG_DIR"
 
 echo "==> Co-locating built frontend as public/"
 rm -rf "$PKG_DIR/public"

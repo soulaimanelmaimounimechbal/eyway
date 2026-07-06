@@ -46,8 +46,12 @@ serves the built frontend, and CI ships one self-contained package.
 ## Two deploy paths (both do the SAME packaging)
 - **GitHub Actions**: `.github/workflows/main_ey-way.yml` (OIDC login, `webapps-deploy`).
 - **Local Git / Kudu**: root `.deployment` runs `deploy.sh`, which reproduces the
-  Actions packaging on the App Service build container (corepack `pnpm@10`, fallback
-  `npm i -g pnpm`; `pnpm install --frozen-lockfile`; build api-server + training
+  Actions packaging on the App Service build container. IMPORTANT: on Oryx the Node
+  dir is read-only, so `corepack enable` can't write a `pnpm` PATH shim and a bare
+  `pnpm` is "command not found". Call pnpm THROUGH corepack instead:
+  `corepack prepare pnpm@X --activate` then run everything as `corepack pnpm ...`
+  (set `COREPACK_ENABLE_DOWNLOAD_PROMPT=0`). Fallback `npm i -g pnpm`.
+  Sequence: `pnpm install --frozen-lockfile`; build api-server + training
   with `BASE_PATH=/ PORT=8080`; `pnpm --filter @workspace/api-server --prod --legacy
   --node-linker=hoisted deploy`; copy `artifacts/training/dist/public` → `public/`;
   publish into `$DEPLOYMENT_TARGET` = wwwroot). Root `package.json` pins
