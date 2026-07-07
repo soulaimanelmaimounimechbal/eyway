@@ -60,12 +60,27 @@ echo "==> Mirroring source to local disk ($WORK_DIR)"
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
 # Copy the repo tree WITHOUT .git or any node_modules (those are rebuilt locally).
+# NOTE: the source (/home/site/repository) is on Azure Files (SMB), whose flaky
+# mtimes make GNU tar emit "file changed as we read it" and exit 1 — a WARNING,
+# not a real failure (the file is still archived). We must tolerate exit code 1
+# (fatal is >= 2) so `set -e` / pipefail doesn't abort the whole deploy.
+set +e
 tar -C "$DEPLOYMENT_SOURCE" \
+  --warning=no-file-changed \
   --exclude='./.git' \
   --exclude='./node_modules' \
   --exclude='*/node_modules' \
   --exclude='./.deploy_pkg' \
   -cf - . | tar -C "$WORK_DIR" -xpf -
+# Capture the whole PIPESTATUS array in one shot: reading it into a scalar first
+# would itself reset PIPESTATUS and leave index [1] unbound under `set -u`.
+pipe_rc=("${PIPESTATUS[@]}")
+rc_create="${pipe_rc[0]}"; rc_extract="${pipe_rc[1]}"
+set -e
+if [ "$rc_create" -gt 1 ] || [ "$rc_extract" -ne 0 ]; then
+  echo "FATAL: source mirror failed (create=$rc_create extract=$rc_extract)" >&2
+  exit 1
+fi
 
 cd "$WORK_DIR"
 # The pnpm content-addressable store lives on PERSISTENT storage (/home, next to
