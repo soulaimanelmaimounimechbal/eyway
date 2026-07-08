@@ -44,6 +44,13 @@ serves the built frontend, and CI ships one self-contained package.
   don't set both.
 
 ## Two deploy paths (both do the SAME packaging)
+- **They target the SAME Web App and do NOT coordinate — whichever ran last wins.**
+  Mixing them races: a `git push azure` (Kudu) and a push to GitHub `main` (Actions)
+  will overwrite each other. Pick ONE per deploy. Symptom of a stale/partial publish:
+  every request 404s with `ENOENT stat .../wwwroot/public/index.html` because the live
+  wwwroot has `dist/` + `node_modules/` but NO `public/` — i.e. the last successful
+  publish predated (or skipped) the frontend co-location step. Verify with
+  `ls -la /home/site/wwwroot/public` in the Kudu SSH console; if missing, redeploy.
 - **GitHub Actions**: `.github/workflows/main_ey-way.yml` (OIDC login, `webapps-deploy`).
 - **Local Git / Kudu**: root `.deployment` runs `deploy.sh`, which reproduces the
   Actions packaging on the App Service build container. Two Kudu gotchas learned:
