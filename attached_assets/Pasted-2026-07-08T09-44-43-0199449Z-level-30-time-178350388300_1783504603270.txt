@@ -1,0 +1,28 @@
+2026-07-08T09:44:43.0199449Z {"level":30,"time":1783503883009,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":124,"method":"HEAD","url":"/"},"res":{"statusCode":404},"responseTime":16,"msg":"request completed"}
+2026-07-08T09:44:43.0200616Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
+2026-07-08T09:44:43.4853653Z {"level":30,"time":1783503883484,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":125,"method":"GET","url":"/"},"res":{"statusCode":404},"responseTime":7,"msg":"request completed"}
+2026-07-08T09:44:43.4868665Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
+2026-07-08T09:44:46.9936067Z {"level":30,"time":1783503886993,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":126,"method":"GET","url":"/"},"res":{"statusCode":404},"responseTime":4,"msg":"request completed"}
+2026-07-08T09:44:46.9942001Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
+2026-07-08T09:45:51.7359253Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
+2026-07-08T09:45:51.7359854Z {"level":30,"time":1783503951731,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":127,"method":"GET","url":"/"},"res":{"statusCode":404},"responseTime":9,"msg":"request completed"}
+2026-07-08T09:52:36.303921Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
+2026-07-08T09:52:36.3039707Z {"level":30,"time":1783504356293,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":128,"method":"HEAD","url":"/"},"res":{"statusCode":404},"responseTime":82,"msg":"request completed"}
+2026-07-08T09:52:36.814259Z {"level":30,"time":1783504356813,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":129,"method":"GET","url":"/"},"res":{"statusCode":404},"responseTime":3,"msg":"request completed"}
+2026-07-08T09:52:36.820504Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
+2026-07-08T09:52:41.4088828Z {"level":30,"time":1783504361408,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":130,"method":"HEAD","url":"/"},"res":{"statusCode":404},"responseTime":5,"msg":"request completed"}
+2026-07-08T09:52:41.4093123Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
+2026-07-08T09:52:41.8173086Z {"level":30,"time":1783504361816,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":131,"method":"GET","url":"/"},"res":{"statusCode":404},"responseTime":43,"msg":"request completed"}
+2026-07-08T09:52:41.817718Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
+2026-07-08T09:52:57.7628497Z {"level":30,"time":1783504377762,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":132,"method":"HEAD","url":"/"},"res":{"statusCode":404},"responseTime":5,"msg":"request completed"}
+2026-07-08T09:52:57.7631078Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
+2026-07-08T09:52:58.0803633Z {"level":30,"time":1783504378069,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":133,"method":"GET","url":"/"},"res":{"statusCode":404},"responseTime":6,"msg":"request completed"}
+2026-07-08T09:52:58.0809535Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
+2026-07-08T09:53:49.3201313Z {"level":30,"time":1783504429303,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":134,"method":"HEAD","url":"/"},"res":{"statusCode":404},"responseTime":9,"msg":"request completed"}
+2026-07-08T09:53:49.3217827Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
+2026-07-08T09:53:59.5889898Z {"level":30,"time":1783504439588,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":135,"method":"HEAD","url":"/"},"res":{"statusCode":404},"responseTime":7,"msg":"request completed"}
+2026-07-08T09:53:59.5894763Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
+2026-07-08T09:53:59.9386835Z {"level":30,"time":1783504439937,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":136,"method":"GET","url":"/"},"res":{"statusCode":404},"responseTime":29,"msg":"request completed"}
+2026-07-08T09:53:59.9393033Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
+2026-07-08T09:54:23.7185694Z {"level":30,"time":1783504463718,"pid":1880,"hostname":"4de5bb3b0d5c","req":{"id":137,"method":"GET","url":"/"},"res":{"statusCode":404},"responseTime":5,"msg":"request completed"}
+2026-07-08T09:54:23.7191421Z Error: ENOENT: no such file or directory, stat '/home/site/wwwroot/public/index.html'
