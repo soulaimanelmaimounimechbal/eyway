@@ -2,31 +2,36 @@
 
 This pnpm monorepo ships as **one** Azure Web App: the `api-server` (Express)
 serves the built `training` frontend from a `public/` folder next to the server
-bundle. There are two supported deploy paths — pick one.
+bundle.
 
-## Option A — Local Git (`git push azure`)
+## Deploy: GitHub Actions
 
-Azure/Kudu builds the app on App Service. The repo blocks `npm` (a `preinstall`
-guard), so a custom Kudu script (`.deployment` → `deploy.sh`) builds with pnpm
-instead of Oryx's default `npm install`.
+Deployment is fully automated by `.github/workflows/main_ey-way.yml`. Push to the
+`main` branch of the connected GitHub repo and the workflow builds and deploys via
+Azure OIDC login:
 
 ```bash
-# one-time: add the Azure remote (from the portal → Deployment Center → Local Git)
-git remote add azure <your-kudu-git-url>
-
-# deploy
-git push azure main:master
+git push origin main
 ```
 
-`deploy.sh` (run automatically by Kudu) installs with pnpm, builds the backend
-and frontend, assembles a self-contained package (bundled server + a real,
-non-symlinked `node_modules` with the externalized `@azure/*` deps + the built
-frontend under `public/`), and publishes it to `wwwroot`.
+The workflow builds on a clean GitHub-hosted runner (no Azure filesystem quirks),
+then:
 
-## Option B — GitHub Actions
+1. `pnpm install --frozen-lockfile`
+2. builds the backend (`@workspace/api-server`) and the frontend
+   (`@workspace/training`, with `BASE_PATH=/ PORT=8080`)
+3. assembles a self-contained package with
+   `pnpm --filter @workspace/api-server --prod --legacy --node-linker=hoisted deploy deploy`
+   (`--node-linker=hoisted` is required so the externalized `@azure/*` deps are real
+   directories that survive the deploy, not symlinks)
+4. co-locates the built frontend: `cp -r artifacts/training/dist/public deploy/public`
+5. deploys the `deploy/` folder to the `ey-way` Web App with startup command
+   `NODE_ENV=production node dist/index.mjs`
 
-Push to `main` and `.github/workflows/main_ey-way.yml` builds and deploys via
-OIDC. Same packaging as Option A.
+The workflow authenticates with Azure via OIDC using these GitHub repo secrets
+(created when the repo is connected to Azure via Deployment Center → GitHub Actions):
+`AZUREAPPSERVICE_CLIENTID_*`, `AZUREAPPSERVICE_TENANTID_*`, `AZUREAPPSERVICE_SUBSCRIPTIONID_*`.
+If the **"Login to Azure"** step fails, the repo isn't connected to Azure yet.
 
 ## Required Azure-side settings (not in code)
 
@@ -47,8 +52,6 @@ Set these in the Azure Portal — they are **not** part of the deploy package:
   (optional `AZURE_OPENAI_DEPLOYMENT`, defaults to `gpt-4o-mini`). Without these
   the app falls back to the deterministic scorer.
 - Do **not** set `PORT` — Linux App Service injects it and the app reads it.
-- With Option A you may leave `SCM_DO_BUILD_DURING_DEPLOYMENT` unset; the
-  `.deployment` command already replaces Oryx's default build.
 
 ## One-time database setup
 

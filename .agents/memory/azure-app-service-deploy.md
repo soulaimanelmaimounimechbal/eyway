@@ -43,34 +43,25 @@ serves the built frontend, and CI ships one self-contained package.
   `AZURE_POSTGRESQL_SSL` is an explicit falsy/"disable" value. Either form works;
   don't set both.
 
-## Two deploy paths (both do the SAME packaging)
-- **They target the SAME Web App and do NOT coordinate — whichever ran last wins.**
-  Mixing them races: a `git push azure` (Kudu) and a push to GitHub `main` (Actions)
-  will overwrite each other. Pick ONE per deploy. Symptom of a stale/partial publish:
-  every request 404s with `ENOENT stat .../wwwroot/public/index.html` because the live
-  wwwroot has `dist/` + `node_modules/` but NO `public/` — i.e. the last successful
-  publish predated (or skipped) the frontend co-location step. Verify with
-  `ls -la /home/site/wwwroot/public` in the Kudu SSH console; if missing, redeploy.
-- **GitHub Actions**: `.github/workflows/main_ey-way.yml` (OIDC login, `webapps-deploy`).
-- **Local Git / Kudu**: root `.deployment` runs `deploy.sh`, which reproduces the
-  Actions packaging on the App Service build container. Two Kudu gotchas learned:
-  1. On Oryx the Node dir is read-only, so `corepack enable` can't write a `pnpm`
-     PATH shim and a bare `pnpm` is "command not found". Call pnpm THROUGH corepack:
-     `corepack prepare pnpm@X --activate` then run everything as `corepack pnpm ...`
-     (set `COREPACK_ENABLE_DOWNLOAD_PROMPT=0`). Fallback `npm i -g pnpm`.
-  2. `/home` (= DEPLOYMENT_SOURCE /home/site/repository AND DEPLOYMENT_TARGET
-     /home/site/wwwroot) is an Azure Files SMB share; pnpm's atomic node_modules
-     renames fail there with `ERR_PNPM_EACCES`. So build on LOCAL disk: tar-mirror
-     the source (exclude .git + node_modules) into /tmp, run install/build/`pnpm
-     deploy` there, then `cp -R` only the finished package onto wwwroot. Keep the
-     pnpm `--store-dir` on persistent /home (SMB store WRITES work; only
-     node_modules renames don't) so packages are reused across deploys.
-  Sequence: `pnpm install --frozen-lockfile`; build api-server + training
-  with `BASE_PATH=/ PORT=8080`; `pnpm --filter @workspace/api-server --prod --legacy
-  --node-linker=hoisted deploy`; copy `artifacts/training/dist/public` → `public/`;
-  publish into `$DEPLOYMENT_TARGET` = wwwroot). Root `package.json` pins
-  `packageManager: pnpm@10.26.1` so corepack picks the lockfile-matching version.
-  Needed because Oryx auto-runs `npm install`, which the preinstall guard rejects.
+## Deploy path: GitHub Actions ONLY
+- `.github/workflows/main_ey-way.yml` (OIDC login, `webapps-deploy`) is the SOLE
+  deploy path. Push to `main` of the connected GitHub repo → it builds on a clean
+  GitHub runner (no SMB/Oryx quirks) and zip-deploys to the `ey-way` Web App.
+- **The old Kudu local-Git path (root `.deployment` + `deploy.sh`) was REMOVED.**
+  Do NOT reintroduce it. It fought the App Service build container: read-only Node
+  dir broke `corepack`, and `/home` is an Azure Files SMB share that fails pnpm's
+  atomic `node_modules` renames (`ERR_PNPM_EACCES`) and makes GNU tar emit spurious
+  "file changed as we read it" (exit 1). Not worth it — Actions sidesteps all of it.
+- Packaging that STILL matters (the workflow does this): `pnpm install
+  --frozen-lockfile`; build api-server + training with `BASE_PATH=/ PORT=8080`;
+  `pnpm --filter @workspace/api-server --prod --legacy --node-linker=hoisted deploy
+  <out>` (hoisted so externalized `@azure/*` survive as real dirs, not symlinks);
+  then `cp -r artifacts/training/dist/public <out>/public`. Root `package.json`
+  keeps `packageManager: pnpm@10.26.1` (harmless, aids reproducibility).
+- Symptom of a bad/stale publish: every request 404s with `ENOENT stat
+  .../wwwroot/public/index.html` = live wwwroot has `dist/` + `node_modules/` but
+  NO `public/` (frontend co-location didn't run). Verify with `ls -la
+  /home/site/wwwroot/public` in Kudu SSH; if missing, redeploy via Actions.
 
 ## Other Azure-side settings the user must configure (not in code)
 - App settings (env): `AZURE_VOICE_LIVE_API_KEY`, `AZURE_VOICE_LIVE_ENDPOINT`,
