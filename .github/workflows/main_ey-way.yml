@@ -1,10 +1,5 @@
 # Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
 # More GitHub Actions for Azure: https://github.com/Azure/actions
-#
-# This project is a pnpm monorepo. `npm install` is intentionally blocked by a
-# preinstall guard, so this workflow uses pnpm. It builds the backend (API +
-# voice proxy) and the frontend (training UI), assembles a single self-contained
-# package, and deploys it to one Azure Web App that serves both.
 
 name: Build and deploy Node.js app to Azure Web App - ey-way
 
@@ -14,69 +9,57 @@ on:
       - main
   workflow_dispatch:
 
-permissions:
-  id-token: write # required for Azure OIDC login
-  contents: read # required for actions/checkout
-
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read #This is required for actions/checkout
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install pnpm
-        # No `version` here on purpose: the root package.json pins
-        # `packageManager: pnpm@10.26.1`, and passing a version too makes
-        # pnpm/action-setup fail with "Multiple versions of pnpm specified".
-        uses: pnpm/action-setup@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Set up Node.js version
+        uses: actions/setup-node@v3
         with:
-          node-version: "24.x"
-          cache: "pnpm"
+          node-version: '24.x'
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build backend (API + voice proxy)
-        run: pnpm --filter @workspace/api-server run build
-
-      - name: Build frontend (training UI)
-        env:
-          BASE_PATH: /
-          PORT: "8080"
-        run: pnpm --filter @workspace/training run build
-
-      - name: Assemble self-contained deploy package
+      - name: npm install, build, and test
         run: |
-          rm -rf deploy
-          # Produces ./deploy with the built server bundle + a flat node_modules
-          # containing the runtime deps that aren't bundled (e.g. @azure/*).
-          # node-linker=hoisted is REQUIRED: pnpm's default symlinked layout does
-          # not survive Azure's zip deploy, so externalized packages like
-          # @azure/ai-voicelive would fail at runtime (ERR_MODULE_NOT_FOUND).
-          pnpm --filter @workspace/api-server --prod --legacy --node-linker=hoisted deploy deploy
-          # Co-locate the built frontend so the server serves it from /public.
-          cp -r artifacts/training/dist/public deploy/public
+          npm install
+          npm run build --if-present
+          npm run test --if-present
 
+      - name: Upload artifact for deployment job
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-app
+          path: .
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      id-token: write #This is required for requesting the JWT
+      contents: read #This is required for actions/checkout
+
+    steps:
+      - name: Download artifact from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: node-app
+      
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_3E8BFBFB4D054846A49EEB19F57F1769 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_10445CFA92ED4C3294F328A6ECBCCE78 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_C05EDF0E0761486FAD93E3CCCA21AE4E }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_5D60B6AB83154AEEACDC0230F084103B }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_A92D88A1EA864110A1CF495E9EC443A1 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_0AAF8DCF45704435B3F260DA5798D55B }}
 
-      - name: Deploy to Azure Web App
+      - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
         with:
-          app-name: "ey-way"
-          slot-name: "Production"
-          package: deploy
-          # NODE_ENV=production is REQUIRED: the logger only uses the pino-pretty
-          # transport (a worker thread whose path is baked at build time and does
-          # not exist on Azure) when NODE_ENV !== "production". Forcing it here
-          # makes the server log plain JSON to stdout with no worker.
-          startup-command: "NODE_ENV=production node dist/index.mjs"
+          app-name: 'ey-way'
+          slot-name: 'Production'
+          package: .
+          
